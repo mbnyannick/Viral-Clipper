@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  viral:
+    build: .
+    restart: always
+    env_file: .env
+    volumes:
+      # Persist runtime scratch across restarts (optional — cleaned up per-run anyway)
+      - ./tmp:/app/tmp
+      # Persist logs
+      - ./logs:/app/logs
+      # Assets are read-only inside the container
+      - ./assets:/app/assets:ro
+      # Cookies for yt-dlp YouTube authentication
+      - ./cookies.txt:/app/cookies.txt
+      # Mount Firefox profile from host for automatic live browser cookie authentication
+      - /home/opc/.mozilla/firefox:/root/.mozilla/firefox:ro
+      # Approved users database
+      - ./approved_users.json:/app/approved_users.json
+      # Code mounts for instant live updates
+      - ./pipeline:/app/pipeline
+      - ./bot:/app/bot
+    deploy:
+      resources:
+        limits:
+          memory: 8G

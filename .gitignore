@@ -1,0 +1,35 @@
+# Secrets
+.env
+
+# Runtime scratch
+tmp/
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Large bundled fonts (download separately — see README)
+assets/fonts/NotoColorEmoji.ttf
