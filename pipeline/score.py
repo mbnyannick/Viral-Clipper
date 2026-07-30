@@ -87,9 +87,9 @@ STREAMER & VIDEO CONTEXT:
 - Video Title: {video_title}
 
 SPEAKER & CAPTION IDENTIFICATION RULES (CRITICAL):
-1. ACTIVE SPEAKER & GUEST NAME EXTRACTION: Actively analyze the Video Title ({video_title}), Channel Name ({streamer}), and spoken transcript to identify the ACTUAL NAMES of ALL speakers, guests, and subjects (e.g. Kai, N3on, Ray, Alabama Barker, Adin, Speed, Duke, etc.).
-2. USE CLEAN SHORT NAMES: If the streamer's name is "Kai Cenat Live", use ONLY "Kai". If it's "N3on Live", use ONLY "N3on". If it's "Adin Live", use ONLY "Adin". NEVER include channel suffixes like "Live", "VODs", "Clips", "Official", or "Gaming" in captions or titles!
-3. USE REAL NAMES IN CAPTIONS: Always use the exact real names of the speakers and guests involved in the moment (e.g. "{streamer} Confronts N3on", "Ray Calls Out Kai", "Alabama Barker Reacts To Adin"). NEVER use generic words like "Bro" when the person's real name is known!
+1. TRUE IDENTITY EXTRACTION (CRITICAL): The Channel Name provided ({streamer}) may just be a brand, aggregator, or network (e.g., 'TVU Networks', 'Daily Clips'). DO NOT blindly use the Channel Name as a person's name! You MUST analyze the conversational context, the Video Title ({video_title}), and your knowledge of famous internet personalities to deduce the TRUE REAL NAMES of the humans speaking.
+2. USE CLEAN SHORT NAMES: Once you deduce the true identities, use ONLY their clean short names (e.g., "Kai", "N3on", "Adin", "Speed", "xQc"). NEVER use channel suffixes, brand names, or aggregator network names in the text overlay!
+3. NEVER USE CHANNEL NAME AS SPEAKER: If the Channel Name is a brand or network, NEVER write "{streamer} Says X". Figure out exactly who the human speaking is, and use their actual name (e.g., "Ray Calls Out Kai", "Alabama Barker Reacts To Adin").
 4. MANDATORY EMOJI: Every single moment MUST include a vibrant, high-energy emoji character in the "emoji" field (e.g. 🔥, 💀, 😱, 😂, 🚨, 🤡, 📈, 🤯). Never leave emoji empty or missing!
 5. EVEN TIMELINE DISTRIBUTION: Spread the {top_n} moments across the full timeline of the video (beginning, middle, and end).
 6. Number of lines: 2 to 4 short lines per caption.
@@ -104,7 +104,7 @@ NARRATIVE ARCS & CLIP DURATION RULES:
 13. CLIP DURATION: Each moment MUST be targeted to the requested duration.
 
 EXAMPLE CAPTION LAYOUTS WITH CLEAN SHORT NAMES:
-  ["{streamer} Confronts N3on", "Streamer University Debate", "Things Got MESSY"]
+  ["Kai Confronts N3on", "Streamer University Debate", "Things Got MESSY"]
   ["Ray Calls Out Kai", "He Was Left Speechless", "The Argument Is COOKED"]
   ["Alabama Barker & N3on", "Unfiltered Stream Moment", "Reaction Was CRAZY"]
 
