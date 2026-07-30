@@ -225,6 +225,13 @@ async def _composite_one(
         
     # SFX
     sfx_events = getattr(moment, "sfx_events", [])
+    if not sfx_events:
+        # Guarantee highly engaging SFX even if LLM fails to generate them
+        sfx_events = [
+            {"type": "whoosh", "time_offset": 0.2},
+            {"type": "boom", "time_offset": max(2.5, (moment.end - moment.start) * 0.3)} # 30% into the clip
+        ]
+        
     for event in sfx_events:
         sfx_type = event.get("type")
         sfx_time = event.get("time_offset", 0.0)
@@ -234,7 +241,8 @@ async def _composite_one(
             input_count += 1
             inputs.extend(["-i", str(sfx_path)])
             delay_ms = int((sfx_time / 1.10) * 1000)
-            af_chain.append(f"[{sfx_idx}:a]adelay={delay_ms}|{delay_ms},volume=0.8[sfx{sfx_idx}]")
+            # Volume increased to 2.5 so it pierces through the 1.5x voice audio
+            af_chain.append(f"[{sfx_idx}:a]adelay={delay_ms}|{delay_ms},volume=2.5[sfx{sfx_idx}]")
             amix_inputs.append(f"[sfx{sfx_idx}]")
             
     # Combine audio
