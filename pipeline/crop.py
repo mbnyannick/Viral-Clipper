@@ -199,11 +199,18 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
     simplified_points.append((duration, simplified_points[-1][1]))
     
     # Generate TV-style FFmpeg Jump-Cut Camera Expressions!
-    expr_str = str(simplified_points[-1][1])
-    for i in range(len(simplified_points) - 2, -1, -1):
+    # We use a flat sum of boolean evaluations to prevent FFmpeg OOM parsing deeply nested IF statements
+    expr_parts = []
+    for i in range(len(simplified_points) - 1):
         t0, x0 = simplified_points[i]
         t1, x1 = simplified_points[i+1]
-        expr_str = f"if(lt(t,{t1:.3f}),{x0},{expr_str})"
+        expr_parts.append(f"{x0}*between(t,{t0:.3f},{t1:.3f})")
+    
+    # Handle time after the last point
+    last_t, last_x = simplified_points[-1]
+    expr_parts.append(f"{last_x}*gte(t,{last_t:.3f})")
+
+    expr_str = "+".join(expr_parts)
 
     logger.info("Face tracking for %s: Generated %d dynamic camera jump-cuts!", clip_path.name, len(simplified_points)-1)
     return f"crop=ih*9/16:ih:'{expr_str}':0,scale=720:1280"

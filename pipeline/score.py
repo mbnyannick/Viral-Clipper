@@ -215,7 +215,7 @@ async def score_moments(
                     Moment(
                         index=i,
                         start=float(item["start"]),
-                        end=float(item["end"]),
+                        end=min(float(item["end"]), float(item["start"]) + 90.0),
                         caption_lines=list(item["caption_lines"]),
                         emoji=item.get("emoji", "🔥"),
                         score=int(item.get("score", 90)),

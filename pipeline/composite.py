@@ -296,7 +296,7 @@ async def _composite_one(
     return out_path if out_path.exists() else clip_path
 
 
-_COMPOSITE_SEMAPHORE = asyncio.Semaphore(2)
+_COMPOSITE_SEMAPHORE = asyncio.Semaphore(1)
 
 
 async def composite_clips(
