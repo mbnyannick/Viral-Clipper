@@ -281,9 +281,10 @@ async def _composite_one(
                 await proc.wait()
         except Exception:
             pass
-        # Fallback fast render without filter graph
+        # Fallback fast render with strict 9:16 static center crop
         cmd_fallback = [
             "ffmpeg", "-y", "-i", str(clip_path),
+            "-vf", "crop=ih*9/16:ih,scale=720:1280",
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-c:a", "aac",
             str(out_path),
         ]
