@@ -53,12 +53,24 @@ _YELLOW_WORDS = {
 }
 
 
-def _get_word_color(word: str) -> str:
-    """Return color string: Vibrant Yellow (#FFD700) for emphasized keywords, Pure White (#FFFFFF) for default."""
+_GREEN_WORDS = {
+    "good", "great", "best", "win", "won", "winner", "success", "successful", "profit",
+    "money", "rich", "wealth", "wealthy", "happy", "joy", "love", "loved", "amazing",
+    "awesome", "perfect", "flawless", "easy", "free", "safe", "secure", "growth", "grow",
+    "fast", "quick", "smart", "genius", "brilliant", "yes", "yeah", "yep", "true", "facts", "exactly"
+}
+
+
+def _get_word_style(word: str) -> str | None:
+    """Return ASS color code and italic tag if special, else None"""
     clean = re.sub(r"[^a-zA-Z]", "", word).lower()
-    if clean in _YELLOW_WORDS or clean in _RED_WORDS:
-        return "#FFD700"  # Vibrant Yellow
-    return "#FFFFFF"      # Pure White
+    if clean in _RED_WORDS:
+        return r"{\c&H0000FF&\i1}"  # Red (BGR) + Italic
+    if clean in _GREEN_WORDS:
+        return r"{\c&H00FF00&\i1}"  # Green (BGR) + Italic
+    if clean in _YELLOW_WORDS or clean in {"think", "thinking", "hmm", "huh"}:
+        return r"{\c&H00D7FF&\i1}"  # Yellow (BGR) + Italic
+    return None
 
 
 def _escape_ffmpeg_text(text: str) -> str:
@@ -116,6 +128,7 @@ def build_word_subtitle_filter(
                     "word": _escape_ffmpeg_text(title_w),
                     "start": rel_start,
                     "end": rel_end,
+                    "style": _get_word_style(raw_w),
                 })
 
     if not words:
@@ -176,8 +189,8 @@ def build_word_subtitle_filter(
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        # PrimaryColor is White (&H00FFFFFF), Outline is Black (&H00000000), Shadow is Black with 60% opacity (&H99000000)
-        f"Style: Hormozi,Roboto Medium,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H99000000,0,0,0,0,100,100,0,0,1,3,3,2,20,20,{margin_v},1",
+        # PrimaryColor is White (&H00FFFFFF), Outline is Black, Shadow is Black, Bold is 1 (True)
+        f"Style: Hormozi,Roboto Medium,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H99000000,1,0,0,0,100,100,0,0,1,3,3,2,20,20,{margin_v},1",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
@@ -197,10 +210,12 @@ def build_word_subtitle_filter(
 
             text_parts = []
             for j, w2 in enumerate(p):
-                # Emphasize active word with Italic (no yellow)
-                if j == i:
-                    text_parts.append(f"{{\\i1}}{w2['word']}{{\\i0}}")
+                # When the word is actively being spoken
+                if j == i and w2.get("style"):
+                    # Emphasize special word with its color and Italic when spoken
+                    text_parts.append(f"{w2['style']}{w2['word']}{{\\c&HFFFFFF&\\i0}}")
                 else:
+                    # Non-special words remain plain bold white
                     text_parts.append(w2["word"])
             
             text_line = " ".join(text_parts)
