@@ -110,14 +110,12 @@ def build_word_subtitle_filter(
             rel_end = max(rel_start + 0.05, round((w_end - clip_start) / speed_factor, 3))
             raw_w = _clean_word_text(w["word"])
             if raw_w:
-                # Specs 2: FORCE UPPERCASE text transformation
-                upper_w = raw_w.upper()
+                # Specs 2: Title Case text transformation
+                title_w = raw_w.capitalize()
                 words.append({
-                    "word": _escape_ffmpeg_text(upper_w),
+                    "word": _escape_ffmpeg_text(title_w),
                     "start": rel_start,
                     "end": rel_end,
-                    "color": _get_word_color(raw_w),
-                })
 
     if not words:
         logger.info("  No word timestamps for clip [%.1f-%.1f] — skipping subtitles", clip_start, clip_end)
@@ -126,7 +124,7 @@ def build_word_subtitle_filter(
     # Extract punch expression for the 1.2x zoom
     punch_words = []
     for w in words:
-        if w["word"].isupper() and len(w["word"]) > 3:
+        if len(w["word"]) > 3:
             punch_words.append(w)
     
     punch_in_expr = None
@@ -167,7 +165,7 @@ def build_word_subtitle_filter(
     # Calculate exact vertical margin based on 67% of canvas_h
     # ASS MarginV is from the bottom if Alignment=2
     margin_v = int(canvas_h * 0.33)  # Bottom is 33% from the bottom edge = 67% from top
-    font_size = max(32, int(canvas_h * 0.043))
+    font_size = max(24, int(canvas_h * 0.035))
 
     ass_lines = [
         "[Script Info]",
@@ -198,9 +196,9 @@ def build_word_subtitle_filter(
 
             text_parts = []
             for j, w2 in enumerate(p):
-                # Yellow in ASS BGR hex is 00D7FF
+                # Emphasize active word with Italic (no yellow)
                 if j == i:
-                    text_parts.append(f"{{\\c&H00D7FF&}}{w2['word']}{{\\c&HFFFFFF&}}")
+                    text_parts.append(f"{{\\i1}}{w2['word']}{{\\i0}}")
                 else:
                     text_parts.append(w2["word"])
             
