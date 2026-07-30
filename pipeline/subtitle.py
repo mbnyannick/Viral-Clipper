@@ -116,6 +116,7 @@ def build_word_subtitle_filter(
                     "word": _escape_ffmpeg_text(title_w),
                     "start": rel_start,
                     "end": rel_end,
+                })
 
     if not words:
         logger.info("  No word timestamps for clip [%.1f-%.1f] — skipping subtitles", clip_start, clip_end)
