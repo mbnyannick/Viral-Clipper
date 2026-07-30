@@ -16,10 +16,14 @@ import cv2
 logger = logging.getLogger(__name__)
 
 try:
+    import cv2
     import mediapipe as mp
+    # Verify solutions API is available (some architectures like ARM64 might lack it)
+    _ = mp.solutions.face_mesh
     HAS_MEDIAPIPE = True
-except ImportError:
+except (ImportError, AttributeError) as e:
     HAS_MEDIAPIPE = False
+    logger.warning("MediaPipe Face Mesh not available (%s), falling back to static crop.", e)
 
 
 async def detect_crop_offset(clip_path: Path) -> str:
@@ -53,6 +57,7 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
         return "scale=720:1280"
 
     default_x = max(0, (width - crop_w) // 2)
+    step_frames = max(1, int(fps / 5))  # sample 5 frames per second
 
     seats = [] # list of dicts: {"center_x": int, "frames": {frame_idx: metric}}
 
