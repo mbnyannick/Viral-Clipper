@@ -671,6 +671,13 @@ async def _process_window_parallel(
     tracker.composited += len(final_clips)  # 🏞️ Finishing counter
 
     # ── 6. Deliver ───────────────────────────────────────────────────────────────────
+    if final_clips:
+        await _send_safe(
+            bot, chat_id,
+            f"🎉 <b>Clips Ready! Delivering {len(final_clips)} clip(s) below...</b>",
+            parse_mode="HTML",
+        )
+
     for i, final_path in enumerate(final_clips):
         m = valid_for_render[i]
         clip_num = m.index + 1
