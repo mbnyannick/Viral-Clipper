@@ -30,14 +30,15 @@ async def deliver_clips(
     Send each clip in *final_clips* as a separate numbered video message with
     1-tap HTML copyable unique SEO title, description, hashtags, and Action Buttons.
     """
-    if not final_clips:
-        await bot.send_message(chat_id=chat_id, text="⚠️ No clips were produced.")
+    valid_clips = [p for p in (final_clips or []) if p is not None and Path(p).exists()]
+    if not valid_clips:
+        await bot.send_message(chat_id=chat_id, text="⚠️ No valid clips were produced.")
         return
 
-    total = len(final_clips)
+    total = len(valid_clips)
     logger.info("Delivering %d clips individually with 1-tap copy captions & action buttons", total)
 
-    for i, path in enumerate(final_clips, start=1):
+    for i, path in enumerate(valid_clips, start=1):
         m = moments[i - 1] if moments and i - 1 < len(moments) else None
         custom_cap = clip_captions[i - 1] if clip_captions and i - 1 < len(clip_captions) else None
         

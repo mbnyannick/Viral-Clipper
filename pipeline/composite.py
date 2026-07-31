@@ -366,4 +366,4 @@ async def composite_clips(
     results = await asyncio.gather(
         *(_safe_composite(c, cap, m) for c, cap, m in zip(clips, captions, moments))
     )
-    return list(results)
+    return [Path(r) for r in results if r is not None and Path(r).exists()]
