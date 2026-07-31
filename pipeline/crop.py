@@ -61,6 +61,9 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
 
     seats = [] # list of dicts: {"center_x": int, "frames": {frame_idx: metric}}
 
+    face_cascade_path = str(Path(__file__).parent.parent / "assets" / "haarcascade_frontalface_default.xml")
+    face_cascade = cv2.CascadeClassifier(face_cascade_path) if Path(face_cascade_path).exists() else None
+
     if HAS_MEDIAPIPE:
         mp_face_mesh = mp.solutions.face_mesh
         face_mesh = mp_face_mesh.FaceMesh(
@@ -70,9 +73,6 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
             min_detection_confidence=0.3,
             min_tracking_confidence=0.3
         )
-    else:
-        face_cascade_path = str(Path(__file__).parent.parent / "assets" / "haarcascade_frontalface_default.xml")
-        face_cascade = cv2.CascadeClassifier(face_cascade_path) if Path(face_cascade_path).exists() else None
 
     import math
 
@@ -89,10 +89,12 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
         else:
             small_frame = frame
 
+        face_found = False
         if HAS_MEDIAPIPE:
             rgb_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
             results = face_mesh.process(rgb_frame)
             if results.multi_face_landmarks:
+                face_found = True
                 for face_landmarks in results.multi_face_landmarks:
                     # Nose tip is roughly landmark 1
                     nx = face_landmarks.landmark[1].x
@@ -117,9 +119,9 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
                             break
                     if not matched:
                         seats.append({"center_x": real_x, "frames": {frame_idx: metric}})
-        else:
-            if face_cascade is None:
-                continue
+        
+        # Dual-Engine Fallback: If MediaPipe fails to find the face (e.g. face is tiny or turned), instantly fallback to HAAR
+        if not face_found and face_cascade is not None:
             gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
             faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
