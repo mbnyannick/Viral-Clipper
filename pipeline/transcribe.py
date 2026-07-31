@@ -34,7 +34,7 @@ async def _transcribe_one(
     logger.info("  Transcribing %s (offset=%.1fs)", chunk_path.name, offset)
     last_exc = None
     
-    url = "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&utterances=true"
+    url = "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&utterances=true&detect_language=true"
     headers = {
         "Authorization": f"Token {api_key}",
     }

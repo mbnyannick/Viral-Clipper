@@ -513,7 +513,7 @@ async def _scan_and_score_window(
         tracker.analyzed += 1
         return {"window_dir": window_dir, "segments": [], "moments": []}
 
-    url = "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&utterances=true"
+    url = "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&utterances=true&detect_language=true"
     headers = {"Authorization": f"Token {deepgram_api_key}"}
     data = None
 
