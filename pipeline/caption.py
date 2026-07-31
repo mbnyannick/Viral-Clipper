@@ -1,16 +1,15 @@
 """
-Step 6 — Caption image rendering: TOP/BOTTOM split layout.
+Step 6 — Caption image rendering.
 
-Non-face-crop layouts:
-  - Renders a full-canvas (720×1280) transparent PNG.
-  - TOP bar: 1 line (hook/tease), ~56px bold, above the 4:3 video zone.
-  - BOTTOM bars: up to 2 lines (payoff), ~46px bold, below the 4:3 video zone.
-  - Each line: dark semi-opaque rounded rect (rgba 0,0,0,195) fitted to text width.
-  - Emoji prepended to every line.
-  - Overlay in composite at (0, 0) — no offset calculation needed.
+Non-face-crop:
+  Full-canvas (720×1280) transparent PNG.
+  ONE single white rounded-rectangle containing all caption lines (1-3),
+  positioned in the lower-center of the 4:3 video zone (overlaid on the footage).
+  Black bold text, centered per line. Emoji at the end of the last line.
+  Composited with enable='between(t,0,5)' so it appears for 5 seconds then vanishes.
 
-face_crop layout:
-  - Small transparent PNG, white bold text + black stroke (unchanged).
+face_crop:
+  Small transparent PNG, white bold text + black stroke.
 """
 
 import logging
@@ -24,32 +23,29 @@ from .subtitle import mask_profanity
 
 logger = logging.getLogger(__name__)
 
-# ── Canvas ───────────────────────────────────────────────────────────────────────
+# ── Canvas ────────────────────────────────────────────────────────────────────
 CANVAS_W: int = 720
 CANVAS_H: int = 1280
 
-# 4:3 video on 720×1280: width=720, height=540, centered
+# 4:3 video zone on 720×1280 (video = 720×540, centered)
 _VIDEO_TOP_Y: int = (CANVAS_H - CANVAS_W * 3 // 4) // 2   # = 370
 _VIDEO_BOT_Y: int = _VIDEO_TOP_Y + CANVAS_W * 3 // 4       # = 910
-_BOTTOM_LIMIT: int = int(CANVAS_H * 0.85)                   # = 1088 (clear of UI zone)
 
-# ── Typography ───────────────────────────────────────────────────────────────────
-TOP_FONT_SIZE: int = 48     # hook line — fits 3-5 words + trailing emoji
-BOT_FONT_SIZE: int = 40     # payoff lines — slightly smaller
-WORD_GAP: int = 8
+# ── Typography ────────────────────────────────────────────────────────────────
+FONT_SIZE: int = 38          # Bold text size — readable on video
+LINE_GAP: int = 10           # Vertical gap between lines inside the box
+WORD_GAP: int = 7
 
-# Derived box heights (font + vertical padding top + bottom)
-_TOP_BOX_H: int = TOP_FONT_SIZE + 20   # PILL_PAD_Y * 2 = 10*2
-_BOT_BOX_H: int = BOT_FONT_SIZE + 20
+# ── Box style (single white card) ────────────────────────────────────────────
+BOX_BG       = (255, 255, 255, 242)  # near-opaque white
+BOX_RADIUS   = 14
+BOX_PAD_X    = 28            # horizontal padding inside box
+BOX_PAD_Y    = 18            # vertical padding inside box
+TEXT_COLOR   = (15, 15, 15)  # near-black text
 
-# ── Pill style ───────────────────────────────────────────────────────────────────
-PILL_ALPHA: int = 195       # ~76% opacity
-PILL_BG = (0, 0, 0, PILL_ALPHA)
-PILL_RADIUS: int = 12
-PILL_PAD_X: int = 22
-PILL_PAD_Y: int = 10
-
-TEXT_COLOR = (255, 255, 255)
+# ── Box vertical anchor: lower-center of the 4:3 video zone ──────────────────
+# Places the center of the white card at ~72% down the video (chest area)
+_BOX_CENTER_Y: int = _VIDEO_TOP_Y + int((_VIDEO_BOT_Y - _VIDEO_TOP_Y) * 0.72)
 
 _SYSTEM_EMOJI_PATHS = [
     "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
@@ -57,7 +53,7 @@ _SYSTEM_EMOJI_PATHS = [
     "/usr/share/fonts/truetype/noto-color-emoji/NotoColorEmoji.ttf",
     "/System/Library/Fonts/Apple Color Emoji.ttc",
 ]
-_BITMAP_FALLBACK_SIZES = [56, 48, 46, 40, 44, 32, 64]
+_BITMAP_FALLBACK_SIZES = [38, 40, 36, 32, 44, 48]
 
 
 def _is_emphasis(word: str) -> bool:
@@ -91,7 +87,7 @@ def _load_fonts(
         raise FileNotFoundError(f"Font file missing at {bold_path}")
 
     normal_font   = ImageFont.truetype(str(medium_path), font_size)
-    emphasis_font = ImageFont.truetype(str(bold_path), font_size)
+    emphasis_font = ImageFont.truetype(str(bold_path),   font_size)
 
     emoji_font = None
     emoji_path = _find_emoji_font(assets_dir)
@@ -108,84 +104,30 @@ def _load_fonts(
     return normal_font, emphasis_font, emoji_font
 
 
-def _tok_w(text: str, font: ImageFont.FreeTypeFont, is_emoji: bool, em_sz: int) -> int:
+def _tok_w(text: str, font: ImageFont.FreeTypeFont, is_emoji: bool) -> int:
     try:
         bb = font.getbbox(text)
-        w = bb[2] - bb[0]
-        return max(w, em_sz) if is_emoji else w
+        w  = bb[2] - bb[0]
+        return max(w, FONT_SIZE) if is_emoji else w
     except Exception:
-        return em_sz if is_emoji else 30
+        return FONT_SIZE if is_emoji else 30
 
 
-def _line_px_w(tokens: list, em_sz: int) -> int:
-    if not tokens:
-        return 0
-    return (
-        sum(_tok_w(t, f, ie, em_sz) for t, f, ie in tokens)
-        + WORD_GAP * (len(tokens) - 1)
-    )
-
-
-def _extract_emojis(emoji_str: str) -> list[str]:
+def _extract_emoji(emoji_str: str) -> str | None:
+    """Return the first emoji character from the field, or None."""
     chars = [c for c in emoji_str if not c.isalnum() and not c.isspace()]
-    return (chars if chars else [emoji_str])[:3]
+    return chars[0] if chars else (emoji_str.strip() or None)
 
 
-def _make_tokens(
-    text: str,
+def _build_line_tokens(
+    line_text: str,
     normal_f: ImageFont.FreeTypeFont,
-    emph_f: ImageFont.FreeTypeFont,
-    emoji_f: ImageFont.FreeTypeFont,
-    append_emoji: str | None,   # emoji goes at END of line, not front
+    emph_f:   ImageFont.FreeTypeFont,
 ) -> list[tuple]:
-    toks: list[tuple] = []
-    for word in text.split():
-        toks.append((word, emph_f if _is_emphasis(word) else normal_f, False))
-    if append_emoji:            # append trailing emoji
-        toks.append((append_emoji, emoji_f, True))
-    return toks
-
-
-def _draw_pill_line(
-    img: Image.Image,
-    tokens: list[tuple],
-    font_size: int,
-    y: int,
-    em_sz: int,
-) -> None:
-    """Composite a dark rounded-rect pill + text tokens onto *img* at row *y*."""
-    lw = _line_px_w(tokens, em_sz)
-    x = (CANVAS_W - lw) // 2
-
-    # Draw pill via alpha_composite
-    pill = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    pd = ImageDraw.Draw(pill)
-    pd.rounded_rectangle(
-        [
-            (max(0, x - PILL_PAD_X), y - PILL_PAD_Y),
-            (min(CANVAS_W, x + lw + PILL_PAD_X), y + font_size + PILL_PAD_Y),
-        ],
-        radius=PILL_RADIUS,
-        fill=PILL_BG,
-    )
-    img.alpha_composite(pill)
-
-    # Draw text tokens
-    draw = ImageDraw.Draw(img)
-    cx = x
-    for text, font, is_emoji in tokens:
-        tw = _tok_w(text, font, is_emoji, em_sz)
-        if is_emoji:
-            try:
-                draw.text((cx, y), text, font=font, embedded_color=True)
-            except Exception:
-                try:
-                    draw.text((cx, y), text, font=font, fill=TEXT_COLOR)
-                except Exception:
-                    pass
-        else:
-            draw.text((cx, y), text, font=font, fill=TEXT_COLOR)
-        cx += tw + WORD_GAP
+    return [
+        (w, emph_f if _is_emphasis(w) else normal_f, False)
+        for w in line_text.split()
+    ]
 
 
 def render_caption(
@@ -201,11 +143,10 @@ def render_caption(
     """
     Render caption PNG for *moment*.
 
-    Non-face-crop: full 720×1280 transparent PNG with TOP bar above and
-    BOTTOM bars below the 4:3 video zone. Returns CANVAS_H (1280).
+    Non-face-crop: Full 720×1280 transparent PNG with ONE white card containing
+    all caption lines, positioned on the video. Returns CANVAS_H (1280).
 
-    face_crop: small transparent PNG with white bold text + stroke.
-    Returns actual pixel height.
+    face_crop: Small transparent PNG, white text + stroke. Returns actual height.
     """
     eff_include_emoji = True if include_emoji is None else include_emoji
 
@@ -219,54 +160,91 @@ def render_caption(
         )
 
     try:
-        top_norm, top_emph, top_emoji = _load_fonts(assets_dir, TOP_FONT_SIZE)
-        bot_norm, bot_emph, bot_emoji = _load_fonts(assets_dir, BOT_FONT_SIZE)
+        norm_f, emph_f, emoji_f = _load_fonts(assets_dir, FONT_SIZE)
     except FileNotFoundError as exc:
         raise PipelineError("caption", str(exc)) from exc
 
-    emoji_chars = _extract_emojis(moment.emoji) if (eff_include_emoji and moment.emoji) else []
+    # Sanitize and split into up to 3 lines
+    raw_lines = [mask_profanity(ln) for ln in (moment.caption_lines or [])[:3]]
+    raw_lines = [ln for ln in raw_lines if ln.strip()]
 
-    # Line 0 = TOP hook, lines 1-2 = BOTTOM payoff
-    clean = [mask_profanity(ln) for ln in (moment.caption_lines or [])[:3]]
-    top_text = clean[0] if clean else ""
-    bot_texts = clean[1:3]
+    # Build token rows (one list per line)
+    line_token_rows: list[list[tuple]] = []
+    for i, ln in enumerate(raw_lines):
+        toks = _build_line_tokens(ln, norm_f, emph_f)
+        # Append the emoji to the LAST line only
+        if i == len(raw_lines) - 1 and eff_include_emoji and moment.emoji:
+            em = _extract_emoji(moment.emoji)
+            if em:
+                toks.append((em, emoji_f, True))
+        line_token_rows.append(toks)
 
+    if not line_token_rows:
+        # Nothing to render — save blank canvas
+        Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0)).save(str(output_path))
+        return CANVAS_H
+
+    # ── Measure each line width ───────────────────────────────────────────────
+    row_widths = [
+        sum(_tok_w(t, f, ie) for t, f, ie in row) + WORD_GAP * max(0, len(row) - 1)
+        for row in line_token_rows
+    ]
+    max_row_w = max(row_widths)
+    n_lines   = len(line_token_rows)
+
+    # ── Compute box dimensions ────────────────────────────────────────────────
+    box_inner_w = max_row_w
+    box_inner_h = FONT_SIZE * n_lines + LINE_GAP * max(0, n_lines - 1)
+    box_w = box_inner_w + BOX_PAD_X * 2
+    box_h = box_inner_h + BOX_PAD_Y * 2
+
+    # Cap box width to canvas (with 20px margin each side)
+    box_w = min(box_w, CANVAS_W - 40)
+
+    # ── Position: centered horizontally, anchored at _BOX_CENTER_Y ───────────
+    box_x0 = (CANVAS_W - box_w) // 2
+    box_y0 = _BOX_CENTER_Y - box_h // 2
+    # Keep inside the 4:3 video zone with margin
+    box_y0 = max(_VIDEO_TOP_Y + 20, min(box_y0, _VIDEO_BOT_Y - box_h - 20))
+    box_x1, box_y1 = box_x0 + box_w, box_y0 + box_h
+
+    # ── Render full-canvas transparent image ──────────────────────────────────
     img = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
 
-    # ── TOP bar: vertically centered in the upper blur bar (0 → _VIDEO_TOP_Y) ────
-    em0 = emoji_chars[0] if emoji_chars else None
-    top_tokens = _make_tokens(top_text, top_norm, top_emph, top_emoji, em0)
-    # Center the pill vertically in the upper zone
-    top_text_y = (_VIDEO_TOP_Y - _TOP_BOX_H) // 2 + PILL_PAD_Y
-    top_text_y = max(PILL_PAD_Y + 6, top_text_y)
-    if top_tokens:
-        _draw_pill_line(img, top_tokens, TOP_FONT_SIZE, top_text_y, TOP_FONT_SIZE)
+    # White card
+    card = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    cd   = ImageDraw.Draw(card)
+    cd.rounded_rectangle([(box_x0, box_y0), (box_x1, box_y1)], radius=BOX_RADIUS, fill=BOX_BG)
+    img.alpha_composite(card)
 
-    # ── BOTTOM bars: vertically centered in the lower safe zone ──────────────────
-    BOT_LINE_GAP = 12
-    n_bot = len([bt for bt in bot_texts if bt.strip()])
-    total_bot_h = _BOT_BOX_H * n_bot + BOT_LINE_GAP * max(0, n_bot - 1)
-    bot_zone_h = _BOTTOM_LIMIT - _VIDEO_BOT_Y
-    # Center the group of bottom boxes in the safe zone below the video
-    bot_text_y = _VIDEO_BOT_Y + max(PILL_PAD_Y + 6, (bot_zone_h - total_bot_h) // 2) + PILL_PAD_Y
+    # Text
+    draw  = ImageDraw.Draw(img)
+    text_y = box_y0 + BOX_PAD_Y
 
-    for i, bt in enumerate(bot_texts):
-        if not bt.strip():
-            continue
-        em = emoji_chars[i + 1] if (i + 1) < len(emoji_chars) else em0
-        bot_tokens = _make_tokens(bt, bot_norm, bot_emph, bot_emoji, em)
-        if not bot_tokens:
-            continue
-        if bot_text_y + BOT_FONT_SIZE + PILL_PAD_Y > _BOTTOM_LIMIT:
-            break
-        _draw_pill_line(img, bot_tokens, BOT_FONT_SIZE, bot_text_y, BOT_FONT_SIZE)
-        bot_text_y += _BOT_BOX_H + BOT_LINE_GAP
+    for row, row_w in zip(line_token_rows, row_widths):
+        # Center each line horizontally inside the box
+        text_x = box_x0 + BOX_PAD_X + (box_inner_w - row_w) // 2
+        cx = text_x
+        for token_text, font, is_emoji in row:
+            tw = _tok_w(token_text, font, is_emoji)
+            if is_emoji:
+                try:
+                    draw.text((cx, text_y), token_text, font=font, embedded_color=True)
+                except Exception:
+                    try:
+                        draw.text((cx, text_y), token_text, font=font, fill=TEXT_COLOR)
+                    except Exception:
+                        pass
+            else:
+                draw.text((cx, text_y), token_text, font=font, fill=TEXT_COLOR)
+            cx += tw + WORD_GAP
+        text_y += FONT_SIZE + LINE_GAP
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(output_path))
     logger.info(
-        "  Caption %02d: %s (full-canvas 720×1280, mode=%s)",
-        moment.index, output_path.name, layout_mode,
+        "  Caption %02d: %s (white card y=%d–%d, %d lines, mode=%s)",
+        moment.index, output_path.name, box_y0, box_y1, n_lines, layout_mode,
     )
     return CANVAS_H
 
@@ -280,11 +258,11 @@ def _render_face_crop(
     stroke_width: int | None = None,
     include_emoji: bool = True,
 ) -> int:
-    """face_crop: small transparent PNG, white text + stroke (unchanged behavior)."""
-    FC_SIZE = 36
+    """face_crop: small transparent PNG, white text + stroke."""
+    FC_SIZE    = 36
     FC_WORD_GAP = 8
     FC_LINE_GAP = 6
-    FC_MAX_W = 500
+    FC_MAX_W   = 500
 
     try:
         norm_f, emph_f, emoji_f = _load_fonts(assets_dir, FC_SIZE)
@@ -297,23 +275,23 @@ def _render_face_crop(
 
     clean_text = mask_profanity(" ".join(moment.caption_lines or []))
     tokens: list[tuple] = []
-    if include_emoji and moment.emoji:
-        for em in _extract_emojis(moment.emoji)[:1]:
-            tokens.append((em, emoji_f, True))
     for word in clean_text.split():
         tokens.append((word, emph_f if _is_emphasis(word) else norm_f, False))
+    if include_emoji and moment.emoji:
+        em = _extract_emoji(moment.emoji)
+        if em:
+            tokens.append((em, emoji_f, True))
 
-    # Wrap into lines
     lines: list[list[tuple]] = []
     cur: list[tuple] = []
     cur_w = 0
     for tok in tokens:
         t, f, ie = tok
-        tw = _tok_w(t, f, ie, FC_SIZE)
+        tw = _tok_w(t, f, ie)
         added = tw if not cur else FC_WORD_GAP + tw
         if cur and cur_w + added > FC_MAX_W:
             lines.append(cur)
-            cur = [tok]
+            cur  = [tok]
             cur_w = tw
         else:
             cur.append(tok)
@@ -322,25 +300,25 @@ def _render_face_crop(
         lines.append(cur)
     lines = lines[:4]
 
-    LINE_H = FC_SIZE + 4
+    LINE_H  = FC_SIZE + 4
     total_h = max(60, LINE_H * len(lines) + FC_LINE_GAP * max(0, len(lines) - 1) + 20)
 
-    img = Image.new("RGBA", (CANVAS_W, total_h), (0, 0, 0, 0))
+    img  = Image.new("RGBA", (CANVAS_W, total_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     y = 10
     for line in lines:
-        lw = sum(_tok_w(t, f, ie, FC_SIZE) for t, f, ie in line) + FC_WORD_GAP * (len(line) - 1)
-        x = (CANVAS_W - lw) // 2
-        for text, font, is_emoji in line:
-            tw = _tok_w(text, font, is_emoji, FC_SIZE)
+        lw = sum(_tok_w(t, f, ie) for t, f, ie in line) + FC_WORD_GAP * (len(line) - 1)
+        x  = (CANVAS_W - lw) // 2
+        for token_text, font, is_emoji in line:
+            tw = _tok_w(token_text, font, is_emoji)
             if is_emoji:
                 try:
-                    draw.text((x, y), text, font=font, embedded_color=True)
+                    draw.text((x, y), token_text, font=font, embedded_color=True)
                 except Exception:
                     pass
             else:
-                draw.text((x, y), text, font=font, fill=eff_text,
+                draw.text((x, y), token_text, font=font, fill=eff_text,
                           stroke_width=eff_sw, stroke_fill=eff_stroke)
             x += tw + FC_WORD_GAP
         y += LINE_H + FC_LINE_GAP

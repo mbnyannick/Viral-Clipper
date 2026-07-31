@@ -203,8 +203,8 @@ async def _composite_one(
             # 4:3 center-crop the sharp foreground, scale to canvas width
             f"[0:v]{crop_4_3},scale={CANVAS_W}:{CANVAS_W * 3 // 4}[fg];"
             f"[bg][fg]overlay=0:{video_top_y},setpts=PTS/1.10[vbase];"
-            # Full-canvas caption PNG (transparent, bars above/below video) at (0,0)
-            f"[vbase][1:v]overlay=0:0[v1];"
+            # Full-canvas white card PNG visible for first 5 seconds only
+            f"[vbase][1:v]overlay=0:0:enable='between(t,0,5)'[v1];"
             f"[v1][2:v]overlay={wm_x}:{wm_y}[out2];"
             f"[out2]null{sub_filter}[out]"
         )
@@ -235,8 +235,8 @@ async def _composite_one(
         vf = (
             # 4:3 crop, scale to canvas width, pad to full canvas with solid bg color
             f"[0:v]{crop_4_3},scale={CANVAS_W}:{CANVAS_W * 3 // 4},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},setpts=PTS/1.10[vbase];"
-            # Full-canvas caption PNG at (0,0)
-            f"[vbase][1:v]overlay=0:0[v1];"
+            # Full-canvas white card PNG visible for first 5 seconds only
+            f"[vbase][1:v]overlay=0:0:enable='between(t,0,5)'[v1];"
             f"[v1][2:v]overlay={wm_x}:{wm_y}[out2];"
             f"[out2]null{sub_filter}[out]"
         )
