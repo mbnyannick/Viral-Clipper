@@ -96,21 +96,21 @@ SPEAKER & CAPTION IDENTIFICATION RULES (CRITICAL):
 4. PROFANITY MASKING (ALGORITHM SAFE): NEVER output raw un-censored swear words or explicit violence terms in caption_lines or title. Always sanitize explicit profanity using asterisks (e.g. "F**K", "K*LL", "SH*T", "B*TCH", "N***A").
 5. MANDATORY EMOJIS (2 TO 3 EMOJIS): Every single moment MUST include 2 to 3 vibrant, high-energy emoji characters together in the "emoji" field (e.g. "🔥💀", "😱🚨", "😂🤡💀", "📈🤯🔥", "🚨😱🤡"). Never leave emoji empty or single!
 6. EVEN TIMELINE DISTRIBUTION: Spread the {top_n} moments across the full timeline of the video (beginning, middle, and end).
-7. Number of lines: 2 to 4 short lines per caption.
-8. Max words per line: 3 to 5 words per line maximum!
-9. Title Case & ALL CAPS Punch Word: Every word starts with a Capital Letter. Exactly ONE key punch word per entire caption MUST be in ALL CAPS (e.g., MESSY, WILD, WRONG, COOKED, CRAZY, UNMATCHED, UNREAL, EXPOSED).
-10. DO NOT put the emoji inside caption_lines — it belongs in the "emoji" field only.
 
-NARRATIVE ARCS & CLIP DURATION RULES:
-10. PEAK VIRAL SELECTION: Choose only high-energy, emotionally intense, or genuinely hilarious moments. Avoid picking plain filler dialogue.
-11. COMPLETE CONVERSATION ARCS: Always capture the FULL context. Start 3–5 seconds BEFORE the dialogue or setup begins so viewers understand what is happening.
-12. NO MID-SENTENCE OR PUNCHLINE CUTS: Always extend the clip 4–6 seconds AFTER the punchline, reaction, or laugh lands. NEVER cut a speaker mid-sentence or cut off the conclusion of a story!
-13. CLIP DURATION: Each moment MUST be between 15 seconds and 60 seconds MAXIMUM (optimal 30s to 45s). NEVER exceed 60 seconds!
+CAPTION FORMAT (STANDING SPEC — follow exactly, every clip, no exceptions):
+7. EXACTLY 3 LINES in caption_lines — no more, no less.
+8. LINE 1 = TOP HOOK: Grabs attention instantly, withholds the full payoff. Lead with the twist/punchline itself — NEVER scene-setting description (e.g. "bro said WHAT" not "the streamer explains himself").
+9. LINES 2–3 = BOTTOM PAYOFF: Deliver the punch. Reinforce the reaction. Complete the emotional arc.
+10. 1 TO 2 KEY WORDS ALL CAPS per overlay total (weight/emphasis only — over-capitalizing kills it). e.g. "bro said WHAT", "he really said that on CAMERA", "caught SLIPPING live".
+11. 3–5 words per line maximum.
+12. 100% UNIQUE PHRASING — no repeated words, hooks, or structure across any clip in this batch, ever.
+13. DO NOT put the emoji inside caption_lines — it belongs in the "emoji" field only.
 
-EXAMPLE CAPTION LAYOUTS WITH CLEAN SHORT NAMES:
-  ["Kai Confronts N3on", "Streamer University Debate", "Things Got MESSY"]
-  ["Ray Calls Out Kai", "He Was Left Speechless", "The Argument Is COOKED"]
-  ["Alabama Barker & N3on", "Unfiltered Stream Moment", "Reaction Was CRAZY"]
+EXAMPLE CAPTION LAYOUTS (correct format):
+  ["bro said WHAT", "i just paraphrase", "said it on CAMERA"]
+  ["caught him SLIPPING", "no cap he froze", "chat went WILD"]
+  ["she asked HOW MUCH", "he told her live", "the number was CRAZY"]
+
 
 Return ONLY a valid JSON array with exactly {top_n} objects. No markdown, no explanation, just raw JSON.
 

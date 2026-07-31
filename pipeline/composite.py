@@ -188,11 +188,9 @@ async def _composite_one(
             )
     elif layout_mode == "blurred_frame":
         crop_4_3 = _get_4_3_crop_filter()
-        # Overlap the caption 40px into the top edge of the video (TikTok style)
-        cap_y = max(15, video_top_y - caption_height + CAPTION_OVERLAP)
         logger.info(
-            "  Compositing clip %02d (blurred_frame 720x1280, 4:3 crop, caption_y=%d, wm_y=%d, speed=1.10x)",
-            moment.index, cap_y, wm_y,
+            "  Compositing clip %02d (blurred_frame 720x1280, 4:3 crop, wm_y=%d, speed=1.10x)",
+            moment.index, wm_y,
         )
         sub_filter = ""
         if enable_subtitles and segments:
@@ -200,10 +198,13 @@ async def _composite_one(
             if sf:
                 sub_filter = f",subtitles='{sf}':fontsdir=assets/fonts"
         vf = (
+            # Blurred full-canvas background from original clip
             f"[0:v]scale=108:192:force_original_aspect_ratio=increase,crop=108:192,boxblur=4:1,scale={CANVAS_W}:{CANVAS_H}[bg];"
-            f"[0:v]{crop_4_3},scale={CANVAS_W}:-2[fg];"
+            # 4:3 center-crop the sharp foreground, scale to canvas width
+            f"[0:v]{crop_4_3},scale={CANVAS_W}:{CANVAS_W * 3 // 4}[fg];"
             f"[bg][fg]overlay=0:{video_top_y},setpts=PTS/1.10[vbase];"
-            f"[vbase][1:v]overlay=0:{cap_y}[v1];"
+            # Full-canvas caption PNG (transparent, bars above/below video) at (0,0)
+            f"[vbase][1:v]overlay=0:0[v1];"
             f"[v1][2:v]overlay={wm_x}:{wm_y}[out2];"
             f"[out2]null{sub_filter}[out]"
         )
@@ -219,11 +220,11 @@ async def _composite_one(
         elif "grey" in layout_mode or "gray" in layout_mode:
             bg_color = "#1a1a1a"  # Dark Charcoal Grey
 
-        # Overlap the caption 40px into the top edge of the video (TikTok style)
-        cap_y = max(15, video_top_y - caption_height + CAPTION_OVERLAP)
+        # FFmpeg pad filter needs 0x-prefixed hex or named colors
+        bg_color_pad = bg_color.replace("#", "0x")
         logger.info(
-            "  Compositing clip %02d (%s 720x1280, color=%s, caption_y=%d, wm_y=%d, speed=1.10x, sub=%s)",
-            moment.index, layout_mode, bg_color, cap_y, wm_y, enable_subtitles,
+            "  Compositing clip %02d (%s 720x1280, color=%s, 4:3 crop, wm_y=%d, speed=1.10x, sub=%s)",
+            moment.index, layout_mode, bg_color, wm_y, enable_subtitles,
         )
         sub_filter = ""
         if enable_subtitles and segments:
@@ -232,8 +233,10 @@ async def _composite_one(
                 sub_filter = f",subtitles='{sf}':fontsdir=assets/fonts"
         crop_4_3 = _get_4_3_crop_filter()
         vf = (
-            f"[0:v]{crop_4_3},scale={CANVAS_W}:-2,pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color},setpts=PTS/1.10[vbase];"
-            f"[vbase][1:v]overlay=0:{cap_y}[v1];"
+            # 4:3 crop, scale to canvas width, pad to full canvas with solid bg color
+            f"[0:v]{crop_4_3},scale={CANVAS_W}:{CANVAS_W * 3 // 4},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},setpts=PTS/1.10[vbase];"
+            # Full-canvas caption PNG at (0,0)
+            f"[vbase][1:v]overlay=0:0[v1];"
             f"[v1][2:v]overlay={wm_x}:{wm_y}[out2];"
             f"[out2]null{sub_filter}[out]"
         )

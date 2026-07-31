@@ -1,21 +1,22 @@
 """
-Step 6 — Caption image rendering with Inter Font & Strict Text Width Calibration.
+Step 6 — Caption image rendering: TOP/BOTTOM split layout.
 
-Features:
-- Font: Inter-Medium for normal text, Inter-Bold for ALL CAPS punch word.
-- Line layout: Character-limit based wrapping (~22 chars/line). The last leftover
-  line goes at the BOTTOM with 2-3 emojis prepended in front of it.
-- Smooth organic background: GaussianBlur radius=12 + threshold=60 fuses all
-  line pills into one crack-free continuous silhouette. Pills also overlap by 2px
-  on top/bottom so there are zero gaps between adjacent lines.
-- Safe Emoji Fallback: Gracefully falls back to normal font if Noto Color Emoji
-  is unavailable on Linux.
+Non-face-crop layouts:
+  - Renders a full-canvas (720×1280) transparent PNG.
+  - TOP bar: 1 line (hook/tease), ~56px bold, above the 4:3 video zone.
+  - BOTTOM bars: up to 2 lines (payoff), ~46px bold, below the 4:3 video zone.
+  - Each line: dark semi-opaque rounded rect (rgba 0,0,0,195) fitted to text width.
+  - Emoji prepended to every line.
+  - Overlay in composite at (0, 0) — no offset calculation needed.
+
+face_crop layout:
+  - Small transparent PNG, white bold text + black stroke (unchanged).
 """
 
 import logging
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont
 
 from .errors import PipelineError
 from .score import Moment
@@ -23,21 +24,28 @@ from .subtitle import mask_profanity
 
 logger = logging.getLogger(__name__)
 
-# ── Layout constants ────────────────────────────────────────────────────────────
+# ── Canvas ───────────────────────────────────────────────────────────────────────
 CANVAS_W: int = 720
-PADDING_TOP: int = 18
-PADDING_BOTTOM: int = 18
-LINE_GAP: int = 8            # Tighter gap so blurred pills fuse with no cracks
-WORD_GAP: int = 9
+CANVAS_H: int = 1280
 
-NORMAL_SIZE: int = 28
-EMPHASIS_SIZE: int = 30
-EMOJI_SIZE: int = 28
+# 4:3 video on 720×1280: width=720, height=540, centered
+_VIDEO_TOP_Y: int = (CANVAS_H - CANVAS_W * 3 // 4) // 2   # = 370
+_VIDEO_BOT_Y: int = _VIDEO_TOP_Y + CANVAS_W * 3 // 4       # = 910
+_BOTTOM_LIMIT: int = int(CANVAS_H * 0.85)                   # = 1088 (clear of UI zone)
 
-CHARS_PER_LINE: int = 22    # Character limit per line (triggers wrap)
+# ── Typography ───────────────────────────────────────────────────────────────────
+TOP_FONT_SIZE: int = 56     # ~7.8% of CANVAS_W (hook line)
+BOT_FONT_SIZE: int = 46     # ~6.4% of CANVAS_W (payoff lines)
+WORD_GAP: int = 8
 
-STROKE_COLOR = (0, 0, 0)
-STROKE_WIDTH = 0
+# ── Pill style ───────────────────────────────────────────────────────────────────
+PILL_ALPHA: int = 195       # ~76% opacity
+PILL_BG = (0, 0, 0, PILL_ALPHA)
+PILL_RADIUS: int = 12
+PILL_PAD_X: int = 22
+PILL_PAD_Y: int = 10
+
+TEXT_COLOR = (255, 255, 255)
 
 _SYSTEM_EMOJI_PATHS = [
     "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
@@ -45,8 +53,7 @@ _SYSTEM_EMOJI_PATHS = [
     "/usr/share/fonts/truetype/noto-color-emoji/NotoColorEmoji.ttf",
     "/System/Library/Fonts/Apple Color Emoji.ttc",
 ]
-
-_BITMAP_FALLBACK_SIZES = [28, 32, 24, 20, 40, 48, 64]
+_BITMAP_FALLBACK_SIZES = [56, 48, 46, 40, 44, 32, 64]
 
 
 def _is_emphasis(word: str) -> bool:
@@ -66,95 +73,115 @@ def _find_emoji_font(assets_dir: Path) -> str | None:
 
 def _load_fonts(
     assets_dir: Path,
+    font_size: int,
 ) -> tuple[ImageFont.FreeTypeFont, ImageFont.FreeTypeFont, ImageFont.FreeTypeFont]:
     inter_bold = assets_dir / "fonts" / "Inter-Bold.ttf"
-    bold_otf = assets_dir / "fonts" / "Bold.otf"
-    bold_ttf = assets_dir / "fonts" / "Bold.ttf"
+    bold_otf   = assets_dir / "fonts" / "Bold.otf"
+    bold_ttf   = assets_dir / "fonts" / "Bold.ttf"
     medium_otf = assets_dir / "fonts" / "Medium.otf"
 
-    bold_path = inter_bold if inter_bold.exists() else (bold_otf if bold_otf.exists() else bold_ttf)
+    bold_path   = inter_bold if inter_bold.exists() else (bold_otf if bold_otf.exists() else bold_ttf)
     medium_path = medium_otf if medium_otf.exists() else bold_path
 
     if not bold_path.exists():
         raise FileNotFoundError(f"Font file missing at {bold_path}")
 
-    normal_font = ImageFont.truetype(str(medium_path), NORMAL_SIZE)
-    emphasis_font = ImageFont.truetype(str(bold_path), EMPHASIS_SIZE)
+    normal_font   = ImageFont.truetype(str(medium_path), font_size)
+    emphasis_font = ImageFont.truetype(str(bold_path), font_size)
 
     emoji_font = None
     emoji_path = _find_emoji_font(assets_dir)
     if emoji_path:
-        try:
-            emoji_font = ImageFont.truetype(emoji_path, EMOJI_SIZE, index=0)
-        except OSError:
-            for sz in _BITMAP_FALLBACK_SIZES:
-                try:
-                    emoji_font = ImageFont.truetype(emoji_path, sz, index=0)
-                    break
-                except OSError:
-                    continue
-
+        for sz in [font_size] + _BITMAP_FALLBACK_SIZES:
+            try:
+                emoji_font = ImageFont.truetype(emoji_path, sz, index=0)
+                break
+            except OSError:
+                continue
     if emoji_font is None:
         emoji_font = normal_font
 
     return normal_font, emphasis_font, emoji_font
 
 
-def _token_size(text: str, font: ImageFont.FreeTypeFont, is_emoji: bool = False) -> tuple[int, int]:
+def _tok_w(text: str, font: ImageFont.FreeTypeFont, is_emoji: bool, em_sz: int) -> int:
     try:
         bb = font.getbbox(text)
-        w, h = bb[2] - bb[0], bb[3] - bb[1]
-        if is_emoji:
-            w = max(w, EMOJI_SIZE)
-            h = max(h, EMOJI_SIZE)
-        return w, h
+        w = bb[2] - bb[0]
+        return max(w, em_sz) if is_emoji else w
     except Exception:
-        return (EMOJI_SIZE, EMOJI_SIZE) if is_emoji else (30, 30)
+        return em_sz if is_emoji else 30
+
+
+def _line_px_w(tokens: list, em_sz: int) -> int:
+    if not tokens:
+        return 0
+    return (
+        sum(_tok_w(t, f, ie, em_sz) for t, f, ie in tokens)
+        + WORD_GAP * (len(tokens) - 1)
+    )
 
 
 def _extract_emojis(emoji_str: str) -> list[str]:
-    """Extract up to 3 individual emoji characters from the emoji field."""
     chars = [c for c in emoji_str if not c.isalnum() and not c.isspace()]
-    if not chars:
-        chars = [emoji_str] if emoji_str.strip() else []
-    return chars[:3]
+    return (chars if chars else [emoji_str])[:3]
 
 
-def _split_text_lines(words: list[str], chars_per_line: int = CHARS_PER_LINE) -> tuple[list[list[str]], list[str]]:
-    """
-    Wrap words into lines by character count.
-    Returns (main_lines, remainder) where remainder is the last short line
-    that will have emojis prepended.
-    """
-    lines: list[list[str]] = []
-    current: list[str] = []
-    current_chars = 0
+def _make_tokens(
+    text: str,
+    normal_f: ImageFont.FreeTypeFont,
+    emph_f: ImageFont.FreeTypeFont,
+    emoji_f: ImageFont.FreeTypeFont,
+    prepend_emoji: str | None,
+) -> list[tuple]:
+    toks: list[tuple] = []
+    if prepend_emoji:
+        toks.append((prepend_emoji, emoji_f, True))
+    for word in text.split():
+        toks.append((word, emph_f if _is_emphasis(word) else normal_f, False))
+    return toks
 
-    for word in words:
-        added = len(word) if not current else len(word) + 1
-        if current and current_chars + added > chars_per_line:
-            lines.append(current)
-            current = [word]
-            current_chars = len(word)
+
+def _draw_pill_line(
+    img: Image.Image,
+    tokens: list[tuple],
+    font_size: int,
+    y: int,
+    em_sz: int,
+) -> None:
+    """Composite a dark rounded-rect pill + text tokens onto *img* at row *y*."""
+    lw = _line_px_w(tokens, em_sz)
+    x = (CANVAS_W - lw) // 2
+
+    # Draw pill via alpha_composite
+    pill = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    pd = ImageDraw.Draw(pill)
+    pd.rounded_rectangle(
+        [
+            (max(0, x - PILL_PAD_X), y - PILL_PAD_Y),
+            (min(CANVAS_W, x + lw + PILL_PAD_X), y + font_size + PILL_PAD_Y),
+        ],
+        radius=PILL_RADIUS,
+        fill=PILL_BG,
+    )
+    img.alpha_composite(pill)
+
+    # Draw text tokens
+    draw = ImageDraw.Draw(img)
+    cx = x
+    for text, font, is_emoji in tokens:
+        tw = _tok_w(text, font, is_emoji, em_sz)
+        if is_emoji:
+            try:
+                draw.text((cx, y), text, font=font, embedded_color=True)
+            except Exception:
+                try:
+                    draw.text((cx, y), text, font=font, fill=TEXT_COLOR)
+                except Exception:
+                    pass
         else:
-            current.append(word)
-            current_chars += added
-
-    if current:
-        lines.append(current)
-
-    if len(lines) > 1:
-        remainder = lines.pop()
-    else:
-        remainder = lines.pop() if lines else []
-
-    return lines, remainder
-
-
-def _line_pixel_width(tokens: list[tuple]) -> int:
-    if not tokens:
-        return 0
-    return sum(_token_size(t, f, ie)[0] for t, f, ie in tokens) + WORD_GAP * (len(tokens) - 1)
+            draw.text((cx, y), text, font=font, fill=TEXT_COLOR)
+        cx += tw + WORD_GAP
 
 
 def render_caption(
@@ -169,108 +196,146 @@ def render_caption(
 ) -> int:
     """
     Render caption PNG for *moment*.
-    Returns the height of the generated image (pixels).
+
+    Non-face-crop: full 720×1280 transparent PNG with TOP bar above and
+    BOTTOM bars below the 4:3 video zone. Returns CANVAS_H (1280).
+
+    face_crop: small transparent PNG with white bold text + stroke.
+    Returns actual pixel height.
     """
     eff_include_emoji = True if include_emoji is None else include_emoji
 
+    if layout_mode == "face_crop":
+        return _render_face_crop(
+            moment, assets_dir, output_path,
+            text_color=text_color,
+            stroke_color=stroke_color,
+            stroke_width=stroke_width,
+            include_emoji=eff_include_emoji,
+        )
+
     try:
-        normal_font, emphasis_font, emoji_font = _load_fonts(assets_dir)
+        top_norm, top_emph, top_emoji = _load_fonts(assets_dir, TOP_FONT_SIZE)
+        bot_norm, bot_emph, bot_emoji = _load_fonts(assets_dir, BOT_FONT_SIZE)
     except FileNotFoundError as exc:
         raise PipelineError("caption", str(exc)) from exc
 
-    full_text = mask_profanity(" ".join(moment.caption_lines))
-    words = full_text.split()
+    emoji_chars = _extract_emojis(moment.emoji) if (eff_include_emoji and moment.emoji) else []
 
-    # ── Build character-limit lines + remainder ─────────────────────────────────
-    main_word_lines, remainder_words = _split_text_lines(words, CHARS_PER_LINE)
+    # Line 0 = TOP hook, lines 1-2 = BOTTOM payoff
+    clean = [mask_profanity(ln) for ln in (moment.caption_lines or [])[:3]]
+    top_text = clean[0] if clean else ""
+    bot_texts = clean[1:3]
 
-    def words_to_tokens(word_list: list[str]) -> list[tuple]:
-        return [
-            (w, emphasis_font if _is_emphasis(w) else normal_font, False)
-            for w in word_list
-        ]
+    img = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
 
-    line_groups: list[list[tuple]] = [words_to_tokens(wl) for wl in main_word_lines]
+    # ── TOP bar ──────────────────────────────────────────────────────────────────
+    em0 = emoji_chars[0] if emoji_chars else None
+    top_tokens = _make_tokens(top_text, top_norm, top_emph, top_emoji, em0)
+    top_line_h = TOP_FONT_SIZE + PILL_PAD_Y * 2
+    top_y = max(10, _VIDEO_TOP_Y - top_line_h - 18)
+    if top_tokens:
+        _draw_pill_line(img, top_tokens, TOP_FONT_SIZE, top_y, TOP_FONT_SIZE)
 
-    # Remainder line: 2-3 emojis first, then leftover words
-    remainder_line: list[tuple] = []
-    if eff_include_emoji and moment.emoji:
-        for em in _extract_emojis(moment.emoji):
-            remainder_line.append((em, emoji_font, True))
-    remainder_line.extend(words_to_tokens(remainder_words))
-    if remainder_line:
-        line_groups.append(remainder_line)
-
-    line_groups = line_groups[:5]
-
-    # ── Measure ─────────────────────────────────────────────────────────────────
-    FIXED_LINE_H = 34
-    LINE_STEP = 8
-    bg_pad_x = 20
-    bg_pad_y = 8     # Generous vertical pad so adjacent pills overlap before blur
-
-    line_widths = [_line_pixel_width(tg) for tg in line_groups]
-    n = len(line_groups)
-
-    text_total_h = FIXED_LINE_H * n + LINE_STEP * max(0, n - 1)
-    total_h = max(PADDING_TOP + bg_pad_y + text_total_h + bg_pad_y + PADDING_BOTTOM, 80)
-
-    # ── 1. Grayscale pill mask with slight overlap so blur fuses them fully ─────
-    mask_img = Image.new("L", (CANVAS_W, total_h), 0)
-    mask_draw = ImageDraw.Draw(mask_img)
-
-    y = PADDING_TOP + bg_pad_y
-    for lw in line_widths:
-        x = (CANVAS_W - lw) // 2
-        mask_draw.rounded_rectangle(
-            [
-                (x - bg_pad_x, y - bg_pad_y - 3),                       # 3px extra top
-                (x + lw + bg_pad_x, y + FIXED_LINE_H + bg_pad_y + 3),   # 3px extra bottom
-            ],
-            radius=16,
-            fill=255,
-        )
-        y += FIXED_LINE_H + LINE_STEP
-
-    # ── 2. Large blur + low threshold → single crack-free organic silhouette ───
-    blurred = mask_img.filter(ImageFilter.GaussianBlur(radius=12))
-    smooth_mask = blurred.point(lambda p: 255 if p > 60 else 0)
-
-    # ── 3. White background through smooth mask ─────────────────────────────────
-    img = Image.new("RGBA", (CANVAS_W, total_h), (0, 0, 0, 0))
-    white_layer = Image.new("RGBA", (CANVAS_W, total_h), (255, 255, 255, 255))
-    img.paste(white_layer, (0, 0), smooth_mask)
-
-    draw = ImageDraw.Draw(img)
-
-    # ── 4. Render tokens ────────────────────────────────────────────────────────
-    y = PADDING_TOP + bg_pad_y
-    for lw, line_tokens in zip(line_widths, line_groups):
-        x = (CANVAS_W - lw) // 2
-        for text, font, is_emoji in line_tokens:
-            token_w, token_h = _token_size(text, font, is_emoji)
-            token_y = y + (FIXED_LINE_H - min(token_h, FIXED_LINE_H)) // 2
-
-            if is_emoji:
-                try:
-                    draw.text((x, token_y), text, font=font, embedded_color=True)
-                except Exception:
-                    try:
-                        draw.text((x, token_y), text, font=font, fill=(0, 0, 0))
-                    except Exception:
-                        logger.warning("Emoji render failed for '%s'", text)
-            else:
-                draw.text((x, token_y), text, font=font, fill=(0, 0, 0), stroke_width=0)
-            x += token_w + WORD_GAP
-
-        y += FIXED_LINE_H + LINE_STEP
+    # ── BOTTOM bars ──────────────────────────────────────────────────────────────
+    LINE_GAP = 14
+    bot_y = _VIDEO_BOT_Y + 18
+    for i, bt in enumerate(bot_texts):
+        em = emoji_chars[i + 1] if (i + 1) < len(emoji_chars) else em0
+        bot_tokens = _make_tokens(bt, bot_norm, bot_emph, bot_emoji, em)
+        if not bot_tokens:
+            continue
+        line_h = BOT_FONT_SIZE + PILL_PAD_Y * 2
+        if bot_y + line_h > _BOTTOM_LIMIT:
+            break
+        _draw_pill_line(img, bot_tokens, BOT_FONT_SIZE, bot_y, BOT_FONT_SIZE)
+        bot_y += line_h + LINE_GAP
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(output_path))
     logger.info(
-        "  Caption %02d: %s (%dpx tall, %d lines, mode=%s)",
-        moment.index, output_path.name, total_h, len(line_groups), layout_mode,
+        "  Caption %02d: %s (full-canvas 720×1280, mode=%s)",
+        moment.index, output_path.name, layout_mode,
     )
+    return CANVAS_H
+
+
+def _render_face_crop(
+    moment: Moment,
+    assets_dir: Path,
+    output_path: Path,
+    text_color: tuple[int, int, int] | None = None,
+    stroke_color: tuple[int, int, int] | None = None,
+    stroke_width: int | None = None,
+    include_emoji: bool = True,
+) -> int:
+    """face_crop: small transparent PNG, white text + stroke (unchanged behavior)."""
+    FC_SIZE = 36
+    FC_WORD_GAP = 8
+    FC_LINE_GAP = 6
+    FC_MAX_W = 500
+
+    try:
+        norm_f, emph_f, emoji_f = _load_fonts(assets_dir, FC_SIZE)
+    except FileNotFoundError as exc:
+        raise PipelineError("caption", str(exc)) from exc
+
+    eff_text   = text_color   if text_color   is not None else (255, 255, 255)
+    eff_stroke = stroke_color if stroke_color is not None else (0, 0, 0)
+    eff_sw     = stroke_width if stroke_width is not None else 3
+
+    clean_text = mask_profanity(" ".join(moment.caption_lines or []))
+    tokens: list[tuple] = []
+    if include_emoji and moment.emoji:
+        for em in _extract_emojis(moment.emoji)[:1]:
+            tokens.append((em, emoji_f, True))
+    for word in clean_text.split():
+        tokens.append((word, emph_f if _is_emphasis(word) else norm_f, False))
+
+    # Wrap into lines
+    lines: list[list[tuple]] = []
+    cur: list[tuple] = []
+    cur_w = 0
+    for tok in tokens:
+        t, f, ie = tok
+        tw = _tok_w(t, f, ie, FC_SIZE)
+        added = tw if not cur else FC_WORD_GAP + tw
+        if cur and cur_w + added > FC_MAX_W:
+            lines.append(cur)
+            cur = [tok]
+            cur_w = tw
+        else:
+            cur.append(tok)
+            cur_w += added
+    if cur:
+        lines.append(cur)
+    lines = lines[:4]
+
+    LINE_H = FC_SIZE + 4
+    total_h = max(60, LINE_H * len(lines) + FC_LINE_GAP * max(0, len(lines) - 1) + 20)
+
+    img = Image.new("RGBA", (CANVAS_W, total_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    y = 10
+    for line in lines:
+        lw = sum(_tok_w(t, f, ie, FC_SIZE) for t, f, ie in line) + FC_WORD_GAP * (len(line) - 1)
+        x = (CANVAS_W - lw) // 2
+        for text, font, is_emoji in line:
+            tw = _tok_w(text, font, is_emoji, FC_SIZE)
+            if is_emoji:
+                try:
+                    draw.text((x, y), text, font=font, embedded_color=True)
+                except Exception:
+                    pass
+            else:
+                draw.text((x, y), text, font=font, fill=eff_text,
+                          stroke_width=eff_sw, stroke_fill=eff_stroke)
+            x += tw + FC_WORD_GAP
+        y += LINE_H + FC_LINE_GAP
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(str(output_path))
     return total_h
 
 

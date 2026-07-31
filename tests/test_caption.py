@@ -81,7 +81,7 @@ def test_render_caption_multiline(assets_dir, tmp_path):
     if not _fonts_available(assets_dir):
         pytest.skip("Font assets not present")
 
-    from pipeline.caption import render_caption
+    from pipeline.caption import render_caption, CANVAS_H
 
     moment = _make_moment(
         caption_lines=["THIS IS THE FIRST LINE", "and this is the second", "wow a third"],
@@ -94,7 +94,9 @@ def test_render_caption_multiline(assets_dir, tmp_path):
     out2 = tmp_path / "caption_single.png"
     h1 = render_caption(moment2, assets_dir, out2)
 
-    assert h3 > h1, "Three-line caption should be taller than one-line caption"
+    # Non-face-crop captions are full-canvas PNGs — both return CANVAS_H
+    assert h3 == CANVAS_H
+    assert h1 == CANVAS_H
 
 
 # ── Font-not-found raises PipelineError ────────────────────────────────────────
