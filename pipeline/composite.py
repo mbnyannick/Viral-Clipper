@@ -275,11 +275,12 @@ async def _composite_one(
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=180.0)
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300.0)
         if proc.returncode != 0:
             logger.warning("clip_%02d compositing error: %s", moment.index, stderr.decode(errors='replace')[-300:])
     except Exception as exc:
-        logger.warning("Clip %02d compositing timeout/error (%s) — using fast fallback copy", moment.index, exc)
+        err_msg = repr(exc) if not str(exc) else str(exc)
+        logger.warning("Clip %02d compositing timeout/error (%s) — using fast fallback copy", moment.index, err_msg)
         try:
             if 'proc' in locals() and proc:
                 proc.kill()
@@ -295,13 +296,13 @@ async def _composite_one(
         ]
         try:
             p2 = await asyncio.create_subprocess_exec(*cmd_fallback, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-            await asyncio.wait_for(p2.communicate(), timeout=30.0)
+            await asyncio.wait_for(p2.communicate(), timeout=60.0)
         except Exception:
             pass
 
 import sys
 
-_COMPOSITE_SEMAPHORE = asyncio.Semaphore(3)
+_COMPOSITE_SEMAPHORE = asyncio.Semaphore(2)
 
 
 def _get_v_encoder_args() -> list[str]:
