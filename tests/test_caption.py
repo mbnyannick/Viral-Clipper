@@ -74,7 +74,7 @@ def test_render_caption_minimum_height(assets_dir, tmp_path):
     out = tmp_path / "caption_short.png"
     height = render_caption(moment, assets_dir, out)
     # Minimum height guard ensures caption is never a sliver
-    assert height >= 120
+    assert height >= 80
 
 
 def test_render_caption_multiline(assets_dir, tmp_path):

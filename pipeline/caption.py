@@ -30,9 +30,9 @@ PADDING_BOTTOM: int = 15
 LINE_GAP: int = 8
 WORD_GAP: int = 10
 
-NORMAL_SIZE: int = 36        # Sleek, compact font size for normal text
-EMPHASIS_SIZE: int = 40      # Compact bold font size for punch words
-EMOJI_SIZE: int = 40         # Emoji size
+NORMAL_SIZE: int = 28        # Proportional, sleek font size for normal text
+EMPHASIS_SIZE: int = 30      # Bold font size for punch words
+EMOJI_SIZE: int = 28         # Emoji size matching text size
 
 TEXT_COLOR = (255, 255, 255)     # Pure white text
 STROKE_COLOR = (0, 0, 0)         # Stroke disabled
@@ -46,7 +46,7 @@ _SYSTEM_EMOJI_PATHS = [
     "/System/Library/Fonts/Apple Color Emoji.ttc",
 ]
 
-_BITMAP_FALLBACK_SIZES = [40, 32, 48, 64, 20, 96, 109, 128, 160]
+_BITMAP_FALLBACK_SIZES = [28, 32, 24, 20, 40, 48, 64]
 
 
 def _is_emphasis(word: str) -> bool:
@@ -192,10 +192,10 @@ def render_caption(
 
     line_tokens = _wrap_tokens(tokens, max_w=MAX_LINE_WIDTH, max_words_per_line=4)
 
-    FIXED_LINE_H = 40
-    LINE_STEP = 12
-    bg_pad_x = 24
-    bg_pad_y = 6
+    FIXED_LINE_H = 32
+    LINE_STEP = 10
+    bg_pad_x = 18
+    bg_pad_y = 5
 
     line_dims: list[tuple[int, int]] = []
     for line in line_tokens:
@@ -207,7 +207,7 @@ def render_caption(
 
     text_total_h = sum(h for _, h in line_dims) + LINE_STEP * max(0, len(line_dims) - 1)
     total_h = PADDING_TOP + text_total_h + PADDING_BOTTOM + (bg_pad_y * 2)
-    total_h = max(total_h, 120)
+    total_h = max(total_h, 100)
 
     # 1. Create grayscale mask combining all line pills
     mask_img = Image.new("L", (CANVAS_W, total_h), 0)
@@ -219,13 +219,13 @@ def render_caption(
     for (line_w, line_h), x in zip(line_dims, line_offsets):
         mask_draw.rounded_rectangle(
             [(x - bg_pad_x, y - bg_pad_y), (x + line_w + bg_pad_x, y + line_h + bg_pad_y)],
-            radius=16,
+            radius=12,
             fill=255
         )
         y += line_h + LINE_STEP
 
     # 2. Smoothly blur and threshold to fuse pills into ONE continuous organic dynamic silhouette
-    blurred = mask_img.filter(ImageFilter.GaussianBlur(radius=6))
+    blurred = mask_img.filter(ImageFilter.GaussianBlur(radius=5))
     smooth_mask = blurred.point(lambda p: 255 if p > 80 else 0)
 
     # 3. Create final canvas and paste solid white background using the smooth organic mask
@@ -240,7 +240,7 @@ def render_caption(
     for (line_w, line_h), line, x in zip(line_dims, line_tokens, line_offsets):
         for text, font, is_emoji in line:
             token_w, token_h = _token_size(text, font, is_emoji)
-            token_y = y + (line_h - min(token_h, 36)) // 2
+            token_y = y + (line_h - min(token_h, 28)) // 2
 
             if is_emoji:
                 try:
