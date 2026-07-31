@@ -850,17 +850,18 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     if is_active:
-        elapsed_sec = int(time.time() - active_run_status.get("start_time", time.time()))
+        user_status = active_run_status.get(chat_id, {})
+        elapsed_sec = int(time.time() - user_status.get("start_time", time.time()))
         elapsed_mins = elapsed_sec // 60
         rem_sec = elapsed_sec % 60
         time_str = f"{elapsed_mins}m {rem_sec}s" if elapsed_mins > 0 else f"{elapsed_sec}s"
 
-        info = active_run_status.get("streamer_info", {})
+        info = user_status.get("streamer_info", {})
         streamer = info.get("streamer", "Streamer")
         title = info.get("title", "N/A")
         platform = info.get("platform", "Video")
-        step = active_run_status.get("step", "Processing...")
-        layout_mode = active_run_status.get("layout_mode", "pillarbox")
+        step = user_status.get("step", "Processing...")
+        layout_mode = user_status.get("layout_mode", "pillarbox")
 
         mode_label = "🎬 Blurred Background" if layout_mode in ("blurred_frame", "pillarbox", "default") else "👤 Face Tracking"
 

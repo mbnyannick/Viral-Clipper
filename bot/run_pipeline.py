@@ -128,7 +128,7 @@ async def run_pipeline(
     run_dir = _BASE_TMP / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    active_run_status = {
+    active_run_status[chat_id] = {
         "chat_id": chat_id,
         "url": url,
         "layout_mode": layout_mode,
@@ -151,7 +151,8 @@ async def run_pipeline(
     try:
         # ── 1. Metadata Extraction FIRST (Fast 1-2s query) ──────────────────────
         streamer_info = await extract_metadata(url)
-        active_run_status["streamer_info"] = streamer_info
+        if chat_id in active_run_status:
+            active_run_status[chat_id]["streamer_info"] = streamer_info
 
         streamer_name = streamer_info.get("streamer", "Streamer")
         video_title = streamer_info.get("title", "")
@@ -206,7 +207,8 @@ async def run_pipeline(
             await send_msg(card_msg)
 
             notifier.stop()
-            active_run_status["step"] = f"Streaming pipeline: {total_windows} windows..."
+            if chat_id in active_run_status:
+                active_run_status[chat_id]["step"] = f"Streaming pipeline: {total_windows} windows..."
 
             await run_streaming_pipeline(
                 url=url,
@@ -258,7 +260,8 @@ async def run_pipeline(
             await send_msg(card_msg)
 
             notifier.stop()
-            active_run_status["step"] = f"Smart scan: {total_windows} parallel audio windows..."
+            if chat_id in active_run_status:
+                active_run_status[chat_id]["step"] = f"Smart scan: {total_windows} parallel audio windows..."
 
             await run_streaming_pipeline(
                 url=url,
@@ -292,7 +295,8 @@ async def run_pipeline(
             logger.warning("Failed to send initial status message: %s", exc)
 
         async def update_status(step_name: str) -> None:
-            active_run_status["step"] = step_name
+            if chat_id in active_run_status:
+                active_run_status[chat_id]["step"] = step_name
             if not status_msg:
                 return
             try:
@@ -405,7 +409,8 @@ async def run_pipeline(
         await send_msg("⚡ Your clips are ready!", parse_mode="")
 
         # ── 6. Delivery ─────────────────────────────────────────────────────────
-        active_run_status["step"] = "Delivering Clips to Telegram..."
+        if chat_id in active_run_status:
+            active_run_status[chat_id]["step"] = "Delivering Clips to Telegram..."
         await deliver_clips(final_clips, bot, chat_id, moments=moments, clip_captions=clip_captions)
 
         if clip_captions:
@@ -445,7 +450,7 @@ async def run_pipeline(
 
     finally:
         notifier.stop()
-        active_run_status.clear()
+        active_run_status.pop(chat_id, None)
         try:
             shutil.rmtree(run_dir, ignore_errors=True)
             logger.info("Cleaned up run directory: %s", run_dir)
