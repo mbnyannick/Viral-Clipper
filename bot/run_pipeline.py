@@ -15,7 +15,7 @@ import html
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from pipeline.download import download, extract_metadata
+from pipeline.download import download, extract_metadata, _kick_vod_get_hls_url
 from pipeline.chunk import chunk_audio
 from pipeline.transcribe import transcribe_chunks
 from pipeline.score import score_moments, generate_clip_captions, normalize_streamer_name
@@ -227,17 +227,29 @@ async def run_pipeline(
         # download ONLY the video segments that scored highest. Much faster.
         is_kick_vod = "kick.com" in url.lower() and "/videos/" in url.lower()
         if is_kick_vod:
+            # Fetch the real VOD duration from Kick API (yt-dlp always returns 0 for Kick)
+            try:
+                _, kick_channel, kick_title, kick_dur_sec = await _kick_vod_get_hls_url(url)
+                if kick_dur_sec > 0:
+                    duration_sec = float(kick_dur_sec)
+                    dur_display = format_duration(duration_sec)
+                if kick_title and not video_title:
+                    video_title = kick_title
+                if kick_channel and streamer_name in ("Streamer", ""):
+                    streamer_name = kick_channel.capitalize()
+            except Exception as kick_exc:
+                logger.warning("Could not prefetch Kick VOD metadata: %s", kick_exc)
+
             vod_dur_sec = duration_sec if duration_sec > 0 else 18000.0
-            vod_dur_display = dur_display
             total_windows = max(1, int(vod_dur_sec / (streaming_chunk_min * 60)))
 
             card_msg = (
                 f"🎬 **Video Details Identified:**\n"
                 f"• **Platform:** {platform}\n"
-                f"• **Live Status:** {live_status}\n"
+                f"• **Live Status:** 📁 Recorded VOD\n"
                 f"• **Streamer:** {streamer_name}\n"
                 f"• **Title:** {video_title if video_title else 'N/A'}\n"
-                f"• **Duration:** {vod_dur_display}\n\n"
+                f"• **Duration:** {dur_display}\n\n"
                 f"⚡ **Smart Scan Mode Active!**\n"
                 f"• Audio-scanning full VOD in {total_windows} parallel chunks\n"
                 f"• Only downloading the top viral segments\n"

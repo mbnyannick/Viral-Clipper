@@ -577,13 +577,24 @@ async def run_streaming_pipeline(
     total_mins = int((stream_end_sec - stream_start_sec) / 60)
     dvr_hrs = dvr_duration / 3600 if dvr_duration > 0 else 0
 
+    # Tailor the message depending on whether we're scanning a full VOD or just a live DVR window
+    is_full_vod_scan = stream_start_sec == 0.0
+    if is_full_vod_scan:
+        scan_line = f"• Scanning full VOD ({total_mins} minutes total)"
+        dvr_line = f"• VOD duration: {dvr_hrs:.1f} hours"
+        eta_line = f"• Estimated time: ~5–8 minutes ⚡"
+    else:
+        scan_line = f"• Clipping last {total_mins} minutes of stream"
+        dvr_line = f"• DVR buffer: {dvr_hrs:.1f} hours available"
+        eta_line = f"• First clips arriving in ~10–12 minutes 🚀"
+
     await _send_safe(
         bot, chat_id,
         f"⚡ Launching {total} windows IN PARALLEL\n"
-        f"• Clipping last {total_mins} minutes of stream\n"
-        f"• DVR buffer: {dvr_hrs:.1f} hours available\n"
+        f"{scan_line}\n"
+        f"{dvr_line}\n"
         f"• {total} × {chunk_minutes}-min chunks downloading simultaneously\n"
-        f"• First clips arriving in ~10–12 minutes 🚀",
+        f"{eta_line}",
     )
 
     logger.info(
