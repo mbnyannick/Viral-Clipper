@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 CANVAS_W = 720
 CANVAS_H = 1280
 GAP_PX = 24
+CAPTION_OVERLAP = 40   # px the caption overlaps INTO the top of the video frame
 
 _COMPOSITE_CONCURRENCY = 2
 
@@ -187,7 +188,8 @@ async def _composite_one(
             )
     elif layout_mode == "blurred_frame":
         crop_4_3 = _get_4_3_crop_filter()
-        cap_y = max(15, video_top_y - caption_height - 15)
+        # Overlap the caption 40px into the top edge of the video (TikTok style)
+        cap_y = max(15, video_top_y - caption_height + CAPTION_OVERLAP)
         logger.info(
             "  Compositing clip %02d (blurred_frame 720x1280, 4:3 crop, caption_y=%d, wm_y=%d, speed=1.10x)",
             moment.index, cap_y, wm_y,
@@ -217,7 +219,8 @@ async def _composite_one(
         elif "grey" in layout_mode or "gray" in layout_mode:
             bg_color = "#1a1a1a"  # Dark Charcoal Grey
 
-        cap_y = max(60, video_top_y - caption_height - 20)
+        # Overlap the caption 40px into the top edge of the video (TikTok style)
+        cap_y = max(15, video_top_y - caption_height + CAPTION_OVERLAP)
         logger.info(
             "  Compositing clip %02d (%s 720x1280, color=%s, caption_y=%d, wm_y=%d, speed=1.10x, sub=%s)",
             moment.index, layout_mode, bg_color, cap_y, wm_y, enable_subtitles,
