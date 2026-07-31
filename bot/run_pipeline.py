@@ -373,11 +373,22 @@ async def run_pipeline(
     except PipelineError as exc:
         notifier.stop()
         logger.error("Pipeline %s failed at '%s': %s", run_id, exc.step, exc.reason)
-        await send_msg("❌ Couldn't process this video. Moving to the next link...", parse_mode="")
+        error_msg = (
+            f"❌ <b>Video Processing Failed</b>\n\n"
+            f"<b>Step:</b> <code>{html.escape(exc.step)}</code>\n"
+            f"<b>Reason:</b> <code>{html.escape(exc.reason)}</code>\n\n"
+            f"<i>The bot has safely skipped this video. You can send another link!</i>"
+        )
+        await send_msg(error_msg, parse_mode="HTML")
     except Exception as exc:
         notifier.stop()
         logger.exception("Unexpected error in pipeline run %s", run_id)
-        await send_msg("❌ An unexpected error occurred while processing this video.", parse_mode="")
+        error_msg = (
+            f"⚠️ <b>Unexpected System Error</b>\n\n"
+            f"<code>{html.escape(str(exc))}</code>\n\n"
+            f"<i>Please check the server logs for a full traceback. The bot is ready for the next link.</i>"
+        )
+        await send_msg(error_msg, parse_mode="HTML")
 
     finally:
         notifier.stop()
