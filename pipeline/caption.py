@@ -195,35 +195,34 @@ def render_caption(
 
     text_total_h = sum(h for _, h in line_dims) + LINE_GAP * (max(0, len(line_dims) - 1))
 
-    # Transparent background (no card box)
-    total_h = PADDING_TOP + text_total_h + PADDING_BOTTOM
+    # 1. Compute total card dimensions based on max line width and total text height
+    max_line_w = max(w for w, _ in line_dims)
+    pad_x = 32
+    pad_y = 20
+    card_w = max_line_w + (pad_x * 2)
+    card_h = text_total_h + (pad_y * 2)
+
+    total_h = card_h + (PADDING_TOP * 2)
     total_h = max(total_h, 120)
 
     img = Image.new("RGBA", (CANVAS_W, total_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # 1. First compute line X positions and bounding box for the entire text block
-    line_offsets = []
-    for line_w, _ in line_dims:
-        x = (CANVAS_W - line_w) // 2
-        line_offsets.append(x)
+    card_left = (CANVAS_W - card_w) // 2
+    card_top = PADDING_TOP
 
-    bg_pad_x = 24
-    bg_pad_y = 12
+    # 2. Draw ONE single unified white container card box with rounded corners (Matching Image B)
+    draw.rounded_rectangle(
+        [(card_left, card_top), (card_left + card_w, card_top + card_h)],
+        radius=24,
+        fill=(255, 255, 255)
+    )
 
-    # 2. Draw unified rounded background pill for each line cleanly without vertical overlap
-    y = PADDING_TOP
-    for (line_w, line_h), x in zip(line_dims, line_offsets):
-        draw.rounded_rectangle(
-            [(x - bg_pad_x, y - 2), (x + line_w + bg_pad_x, y + line_h + 2)],
-            radius=12,
-            fill=(255, 255, 255)
-        )
-        y += line_h + LINE_GAP
+    # 3. Render all text lines centered inside the single white card box
+    y = card_top + pad_y
+    for (line_w, line_h), line in zip(line_dims, line_tokens):
+        x = (CANVAS_W - line_w) // 2   # strictly centered horizontally
 
-    # 3. Draw text tokens cleanly over the white background
-    y = PADDING_TOP
-    for (line_w, line_h), line, x in zip(line_dims, line_tokens, line_offsets):
         for text, font, is_emoji in line:
             token_w, token_h = (EMOJI_SIZE, EMOJI_SIZE) if is_emoji else _token_bbox(text, font)
             token_y = y + (line_h - token_h) // 2
@@ -233,7 +232,7 @@ def render_caption(
                     draw.text((x, token_y), text, font=font, embedded_color=True)
                 except Exception:
                     try:
-                        draw.text((x, token_y), text, font=font, fill=eff_text_color)
+                        draw.text((x, token_y), text, font=font, fill=(0, 0, 0))
                     except Exception:
                         logger.warning("Emoji render failed for '%s'", text)
             else:
@@ -241,9 +240,8 @@ def render_caption(
                     (x, token_y),
                     text,
                     font=font,
-                    fill=eff_text_color,
-                    stroke_width=eff_stroke_width,
-                    stroke_fill=eff_stroke_color,
+                    fill=(0, 0, 0),  # Crisp solid black text on white container
+                    stroke_width=0,
                 )
             x += token_w + WORD_GAP
 
