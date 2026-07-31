@@ -14,7 +14,7 @@ import logging
 import re
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 from .errors import PipelineError
 from .score import Moment
@@ -193,9 +193,9 @@ def render_caption(
     line_tokens = _wrap_tokens(tokens, max_w=MAX_LINE_WIDTH, max_words_per_line=4)
 
     FIXED_LINE_H = 40
-    LINE_GAP = 10
-    pad_x = 32
-    pad_y = 20
+    LINE_STEP = 12
+    bg_pad_x = 24
+    bg_pad_y = 6
 
     line_dims: list[tuple[int, int]] = []
     for line in line_tokens:
@@ -205,33 +205,39 @@ def render_caption(
         ) + WORD_GAP * (len(line) - 1)
         line_dims.append((w, FIXED_LINE_H))
 
-    text_total_h = sum(h for _, h in line_dims) + LINE_GAP * max(0, len(line_dims) - 1)
-    max_line_w = max(w for w, _ in line_dims)
-
-    card_w = max_line_w + (pad_x * 2)
-    card_h = text_total_h + (pad_y * 2)
-
-    total_h = card_h + (PADDING_TOP * 2)
+    text_total_h = sum(h for _, h in line_dims) + LINE_STEP * max(0, len(line_dims) - 1)
+    total_h = PADDING_TOP + text_total_h + PADDING_BOTTOM + (bg_pad_y * 2)
     total_h = max(total_h, 120)
 
+    # 1. Create grayscale mask combining all line pills
+    mask_img = Image.new("L", (CANVAS_W, total_h), 0)
+    mask_draw = ImageDraw.Draw(mask_img)
+
+    line_offsets = [(CANVAS_W - lw) // 2 for lw, _ in line_dims]
+
+    y = PADDING_TOP + bg_pad_y
+    for (line_w, line_h), x in zip(line_dims, line_offsets):
+        mask_draw.rounded_rectangle(
+            [(x - bg_pad_x, y - bg_pad_y), (x + line_w + bg_pad_x, y + line_h + bg_pad_y)],
+            radius=16,
+            fill=255
+        )
+        y += line_h + LINE_STEP
+
+    # 2. Smoothly blur and threshold to fuse pills into ONE continuous organic dynamic silhouette
+    blurred = mask_img.filter(ImageFilter.GaussianBlur(radius=6))
+    smooth_mask = blurred.point(lambda p: 255 if p > 80 else 0)
+
+    # 3. Create final canvas and paste solid white background using the smooth organic mask
     img = Image.new("RGBA", (CANVAS_W, total_h), (0, 0, 0, 0))
+    white_layer = Image.new("RGBA", (CANVAS_W, total_h), (255, 255, 255, 255))
+    img.paste(white_layer, (0, 0), smooth_mask)
+
     draw = ImageDraw.Draw(img)
 
-    card_left = (CANVAS_W - card_w) // 2
-    card_top = PADDING_TOP
-
-    # 1. Draw ONE single clean rectangular white card container box (radius=24)
-    draw.rounded_rectangle(
-        [(card_left, card_top), (card_left + card_w, card_top + card_h)],
-        radius=24,
-        fill=(255, 255, 255)
-    )
-
-    # 2. Render all text lines centered inside the single white card box
-    y = card_top + pad_y
-    for (line_w, line_h), line in zip(line_dims, line_tokens):
-        x = (CANVAS_W - line_w) // 2   # strictly centered horizontally
-
+    # 4. Render all text tokens centered in crisp solid black over the smooth white background
+    y = PADDING_TOP + bg_pad_y
+    for (line_w, line_h), line, x in zip(line_dims, line_tokens, line_offsets):
         for text, font, is_emoji in line:
             token_w, token_h = _token_size(text, font, is_emoji)
             token_y = y + (line_h - min(token_h, 36)) // 2
@@ -254,7 +260,7 @@ def render_caption(
                 )
             x += token_w + WORD_GAP
 
-        y += line_h + LINE_GAP
+        y += line_h + LINE_STEP
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(output_path))
