@@ -98,18 +98,19 @@ SPEAKER & CAPTION IDENTIFICATION RULES (CRITICAL):
 6. EVEN TIMELINE DISTRIBUTION: Spread the {top_n} moments across the full timeline of the video (beginning, middle, and end).
 
 CAPTION FORMAT (STANDING SPEC — follow exactly, every clip, no exceptions):
-7. EXACTLY 3 LINES in caption_lines — no more, no less.
-8. LINE 1 = TOP HOOK: Grabs attention instantly, withholds the full payoff. Lead with the twist/punchline itself — NEVER scene-setting description (e.g. "bro said WHAT" not "the streamer explains himself").
-9. LINES 2–3 = BOTTOM PAYOFF: Deliver the punch. Reinforce the reaction. Complete the emotional arc.
-10. 1 TO 2 KEY WORDS ALL CAPS per overlay total (weight/emphasis only — over-capitalizing kills it). e.g. "bro said WHAT", "he really said that on CAMERA", "caught SLIPPING live".
-11. 3–5 words per line maximum.
-12. 100% UNIQUE PHRASING — no repeated words, hooks, or structure across any clip in this batch, ever.
+7. EXACTLY 3 LINES in caption_lines — no more, no less. Never 2, never 4. Always 3.
+8. LINE 1 = HOOK (shown first, bold): Short punchy attention-grabber. Lead with the SHOCKING or FUNNY moment itself. MUST contain 1 key word in ALL CAPS. BAD: "The streamer reacts to news" GOOD: "bro said WHAT on stream"
+9. LINES 2–3 = PAYOFF: Deliver the punch in 2 short lines. Must complete the story or reaction. MUST contain 1 more ALL CAPS word somewhere in lines 2–3. e.g. "he actually said that LIVE" or "chat went ABSOLUTELY insane".
+10. TOTAL ALL CAPS: exactly 1–2 ALL CAPS words spread across all 3 lines. Not zero (no emphasis = bland), not 3+ (over-capitalizing kills impact).
+11. 3–5 words per line maximum. Count strictly.
+12. 100% UNIQUE PHRASING — no repeated words, hooks, or sentence structure across any clip in this batch.
 13. DO NOT put the emoji inside caption_lines — it belongs in the "emoji" field only.
 
-EXAMPLE CAPTION LAYOUTS (correct format):
+CORRECT EXAMPLES (copy this style exactly):
   ["bro said WHAT", "i just paraphrase", "said it on CAMERA"]
   ["caught him SLIPPING", "no cap he froze", "chat went WILD"]
-  ["she asked HOW MUCH", "he told her live", "the number was CRAZY"]
+  ["she asked HOW MUCH", "he admitted it LIVE", "the number was insane"]
+  ["EXPOSED on stream", "he couldn't even explain", "the chat lost it"]
 
 
 Return ONLY a valid JSON array with exactly {top_n} objects. No markdown, no explanation, just raw JSON.
@@ -117,8 +118,8 @@ Return ONLY a valid JSON array with exactly {top_n} objects. No markdown, no exp
 Each object must have exactly these fields:
   "start"         — float, seconds from start of video
   "end"           — float, seconds from start of video
-  "caption_lines" — array of 2–4 strings (Title Case with real speaker names, max 5 words/line, ONE word ALL CAPS total across all lines)
-  "emoji"         — single relevant emoji character (e.g. 🔥, 💀, 😱, 😂, 🚨, 🤡)
+  "caption_lines" — array of EXACTLY 3 strings. Line 1 = hook with 1 ALL CAPS word. Lines 2–3 = payoff with 1 more ALL CAPS word somewhere. Max 5 words/line. NO emoji in this field.
+  "emoji"         — 2 to 3 relevant emoji characters together (e.g. "🔥💀", "😱🚨", "😂🤡💀") — these appear at the END of the white text card in the video
   "score"         — integer, Viral potential score from 0 to 100
   "reasoning"     — string, a punchy 1-sentence explanation of exactly WHY this moment is highly viral
   "title"         — string, A highly-clickable YouTube Shorts title (MAXIMUM 38 CHARACTERS). It MUST be 38 characters or less or it will get cut off on mobile!\

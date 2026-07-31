@@ -177,13 +177,17 @@ async def _composite_one(
                 f"[0:v]{crop_filter},setpts=PTS/1.10[base];"
                 f"[0:v]{zoom_crop},setpts=PTS/1.10[zoom];"
                 f"[base][zoom]overlay=x=0:y=0:enable='{punch_in_expr}'[cropped];"
-                f"[cropped][2:v]overlay={wm_x}:{wm_y}[out2];"
+                # White card overlay visible for first 5 seconds
+                f"[cropped][1:v]overlay=0:0:enable='between(t,0,5)'[with_cap];"
+                f"[with_cap][2:v]overlay={wm_x}:{wm_y}[out2];"
                 f"[out2]null{sub_filter}[out]"
             )
         else:
             vf = (
                 f"[0:v]{crop_filter},setpts=PTS/1.10[cropped];"
-                f"[cropped][2:v]overlay={wm_x}:{wm_y}[out2];"
+                # White card overlay visible for first 5 seconds
+                f"[cropped][1:v]overlay=0:0:enable='between(t,0,5)'[with_cap];"
+                f"[with_cap][2:v]overlay={wm_x}:{wm_y}[out2];"
                 f"[out2]null{sub_filter}[out]"
             )
     elif layout_mode == "blurred_frame":
