@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from openai import AsyncOpenAI
@@ -31,11 +31,11 @@ class Moment:
     end: float            # seconds from video start
     caption_lines: list[str]   # 2–4 strings; CAPS words = emphasis
     emoji: str
-    score: int            # Viral potential score (0-100)
-    reasoning: str        # 1-sentence explanation of why it's viral
-    title: str            # YouTube Shorts title (Max 38 characters)
-    bgm_track: str        # "hype", "suspense", "funny", "sad", or "none"
-    sfx_events: list[dict] # list of {"type": "boom"|"whoosh"|"ding", "time_offset": float}
+    score: int = 90       # Viral potential score (0-100)
+    reasoning: str = ""   # 1-sentence explanation of why it's viral
+    title: str = ""       # YouTube Shorts title (Max 38 characters)
+    bgm_track: str = "none" # "hype", "suspense", "funny", "sad", or "none"
+    sfx_events: list[dict] = field(default_factory=list) # list of {"type": "boom"|"whoosh"|"ding", "time_offset": float}
 
     @property
     def duration(self) -> float:

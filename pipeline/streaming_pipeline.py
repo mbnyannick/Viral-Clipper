@@ -594,6 +594,11 @@ async def _process_window_parallel(
         clamped.append(Moment(
             index=m.index, start=start, end=end,
             caption_lines=m.caption_lines, emoji=m.emoji,
+            score=getattr(m, "score", 90),
+            reasoning=getattr(m, "reasoning", ""),
+            title=getattr(m, "title", ""),
+            bgm_track=getattr(m, "bgm_track", "none"),
+            sfx_events=getattr(m, "sfx_events", []),
         ))
     valid = clamped
 
@@ -605,6 +610,11 @@ async def _process_window_parallel(
         indexed.append(Moment(
             index=idx, start=m.start, end=m.end,
             caption_lines=m.caption_lines, emoji=m.emoji,
+            score=getattr(m, "score", 90),
+            reasoning=getattr(m, "reasoning", ""),
+            title=getattr(m, "title", ""),
+            bgm_track=getattr(m, "bgm_track", "none"),
+            sfx_events=getattr(m, "sfx_events", []),
         ))
 
     tracker.moments_found += len(indexed)  # ⬇️ Downloading counter
