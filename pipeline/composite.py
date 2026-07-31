@@ -288,7 +288,6 @@ async def _composite_one(
                 await proc.wait()
         except Exception:
             pass
-        # Fallback fast render with strict 9:16 static center crop
         cmd_fallback = [
             "ffmpeg", "-y", "-i", str(clip_path),
             "-vf", "crop=ih*9/16:ih,scale=720:1280",
@@ -300,6 +299,8 @@ async def _composite_one(
             await asyncio.wait_for(p2.communicate(), timeout=60.0)
         except Exception:
             pass
+
+    return out_path if out_path.exists() else clip_path
 
 import sys
 
