@@ -101,7 +101,7 @@ NARRATIVE ARCS & CLIP DURATION RULES:
 10. PEAK VIRAL SELECTION: Choose only high-energy, emotionally intense, or genuinely hilarious moments. Avoid picking plain filler dialogue.
 11. COMPLETE CONVERSATION ARCS: Always capture the FULL context. Start 3–5 seconds BEFORE the dialogue or setup begins so viewers understand what is happening.
 12. NO MID-SENTENCE OR PUNCHLINE CUTS: Always extend the clip 4–6 seconds AFTER the punchline, reaction, or laugh lands. NEVER cut a speaker mid-sentence or cut off the conclusion of a story!
-13. CLIP DURATION: Each moment MUST be targeted to the requested duration.
+13. CLIP DURATION: Each moment MUST be between 15 seconds and 60 seconds MAXIMUM (optimal 30s to 45s). NEVER exceed 60 seconds!
 
 EXAMPLE CAPTION LAYOUTS WITH CLEAN SHORT NAMES:
   ["Kai Confronts N3on", "Streamer University Debate", "Things Got MESSY"]

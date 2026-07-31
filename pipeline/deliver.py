@@ -90,8 +90,25 @@ async def deliver_clips(
             ]
         ])
 
+        target_path = path
+        if path.exists() and path.stat().st_size > 49 * 1024 * 1024:
+            logger.warning("Clip %d (%.1f MB) exceeds 50MB Telegram limit. Auto-compressing...", i, path.stat().st_size / (1024*1024))
+            compressed = path.parent / f"{path.stem}_comp.mp4"
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "ffmpeg", "-y", "-i", str(path),
+                    "-c:v", "libx264", "-crf", "28", "-preset", "fast",
+                    "-c:a", "aac", "-b:a", "128k", str(compressed),
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+                await asyncio.wait_for(proc.communicate(), timeout=90.0)
+                if compressed.exists() and compressed.stat().st_size > 0:
+                    target_path = compressed
+            except Exception as comp_exc:
+                logger.warning("Auto-compression failed: %s", comp_exc)
+
         try:
-            with open(path, "rb") as fh:
+            with open(target_path, "rb") as fh:
                 await bot.send_video(
                     chat_id=chat_id,
                     video=fh,
@@ -103,16 +120,17 @@ async def deliver_clips(
             logger.info("  Sent Clip %d/%d with Action Buttons", i, total)
         except Exception as exc:
             try:
-                # Fallback video send without markup
-                with open(path, "rb") as fh:
+                with open(target_path, "rb") as fh:
                     await bot.send_video(
                         chat_id=chat_id,
                         video=fh,
                         caption=f"📹 Clip {i:02d}/{total:02d}",
                         supports_streaming=True,
                     )
-            except Exception:
-                raise PipelineError("deliver", f"Clip {i}/{total}: {exc}") from exc
+            except Exception as final_exc:
+                logger.warning("Failed to deliver clip %d (%s)", i, final_exc)
+                # Continue delivering remaining clips instead of crashing the entire run
+                continue
 
     logger.info("All %d clips delivered", total)
 
