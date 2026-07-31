@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 _ASSETS_DIR = Path("assets")
 _HD_DOWNLOAD_SEM = None
+_AUDIO_DOWNLOAD_SEM = None
 
 
 def _get_hd_sem():
@@ -44,6 +45,13 @@ def _get_hd_sem():
     if _HD_DOWNLOAD_SEM is None:
         _HD_DOWNLOAD_SEM = asyncio.Semaphore(4)
     return _HD_DOWNLOAD_SEM
+
+
+def _get_audio_sem():
+    global _AUDIO_DOWNLOAD_SEM
+    if _AUDIO_DOWNLOAD_SEM is None:
+        _AUDIO_DOWNLOAD_SEM = asyncio.Semaphore(6)
+    return _AUDIO_DOWNLOAD_SEM
 
 
 async def _send_safe(bot, chat_id, text: str, parse_mode: str = "") -> None:
@@ -105,17 +113,19 @@ class _ProgressTracker:
         return "▓" * filled + "░" * (width - filled)
 
     def _render(self) -> str:
+        import html
         n = self.total
-        title_part = f" • {self.title[:28]}…" if self.title and len(self.title) > 3 else ""
+        s_name = html.escape(self.streamer)
+        t_name = html.escape(self.title[:28] + ("…" if len(self.title) > 28 else ""))
+        title_part = f" • {t_name}" if t_name else ""
 
         def _stage(icon: str, label: str, done: int, total: int, override: str = "") -> str:
             if override:
-                return f"{icon} {label:<12} {override}"
-            pct = done / max(total, 1)
+                return f"{icon} {label:<10} {override}"
             bar = self._bar(done, total)
             if done >= total:
-                return f"{icon} {label:<12} {bar}  {done}/{total} ✅"
-            return f"{icon} {label:<12} {bar}  {done}/{total}"
+                return f"{icon} {label:<10} {bar}  {done}/{total} ✅"
+            return f"{icon} {label:<10} {bar}  {done}/{total}"
 
         # Stage 3: downloading/compositing
         if self.moments_found > 0:
@@ -129,12 +139,13 @@ class _ProgressTracker:
         )
 
         lines = [
-            f"🎬 *Processing {self.streamer}*{title_part}",
-            "",
+            f"🎬 <b>Processing {s_name}</b>{title_part}",
+            "<pre>",
             _stage("📡", "Scanning", self.scanned, n),
             _stage("🧠", "Analyzing", self.analyzed, n),
-            f"⬇️ {'Downloading':<12} {dl_override}",
-            f"🏞️ {'Finishing':<12} {finish_override}",
+            f"⬇️ {'Download':<10} {dl_override}",
+            f"🏞️ {'Finishing':<10} {finish_override}",
+            "</pre>",
         ]
         return "\n".join(lines)
 
@@ -145,7 +156,7 @@ class _ProgressTracker:
             msg = await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=self._render(),
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
             self._msg_id = msg.message_id
         except Exception as exc:
@@ -169,12 +180,12 @@ class _ProgressTracker:
                 chat_id=self.chat_id,
                 message_id=self._msg_id,
                 text=self._render(),
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
         except Exception as exc:
             # "Message is not modified" is expected when nothing changed — silently ignore
             if "not modified" not in str(exc).lower():
-                logger.debug("ProgressTracker edit failed: %s", exc)
+                logger.warning("ProgressTracker edit failed: %s", exc)
 
     async def stop(self, final_text: str = "") -> None:
         """Stop the edit loop and write the final state."""
@@ -187,7 +198,7 @@ class _ProgressTracker:
                     chat_id=self.chat_id,
                     message_id=self._msg_id,
                     text=final_text,
-                    parse_mode="Markdown",
+                    parse_mode="HTML",
                 )
             except Exception as exc:
                 logger.warning("ProgressTracker final edit failed: %s", exc)
@@ -451,17 +462,19 @@ async def _process_window_parallel(
 
     # ── 1. Download audio window via ffmpeg seek ────────────────────────────────────────
     audio_path = window_dir / "audio.m4a"
-    try:
-        await _download_audio_window(
-            hls_url=hls_url,
-            start_sec=window_start,
-            duration_sec=window_duration,
-            output_path=audio_path,
-        )
-    except PipelineError as exc:
-        logger.warning("%s — audio failed: %s. Skipping.", label, exc.reason)
-        tracker.scanned += 1
-        return []
+    audio_sem = _get_audio_sem()
+    async with audio_sem:
+        try:
+            await _download_audio_window(
+                hls_url=hls_url,
+                start_sec=window_start,
+                duration_sec=window_duration,
+                output_path=audio_path,
+            )
+        except PipelineError as exc:
+            logger.warning("%s — audio failed: %s. Skipping.", label, exc.reason)
+            tracker.scanned += 1
+            return []
 
     if not audio_path.exists() or audio_path.stat().st_size < 4096:
         logger.warning("%s — audio too small/missing. Skipping.", label)
