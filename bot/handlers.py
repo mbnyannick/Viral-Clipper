@@ -37,10 +37,10 @@ _campaign_briefs: dict[int, str] = {}
 APPROVED_USERS_FILE = Path("approved_users.json")
 
 
-def _make_layout_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+def _make_layout_keyboard(target_duration: str = "auto") -> InlineKeyboardMarkup:
+    buttons = [
         [
-            InlineKeyboardButton("⚡ Quick Run (Black Canvas Default)", callback_data="fmt:quick_run"),
+            InlineKeyboardButton("🤖 Smart Auto (Best Match)", callback_data="fmt:smart_auto"),
         ],
         [
             InlineKeyboardButton("🖤 Black Canvas", callback_data="fmt:black_canvas"),
@@ -51,13 +51,18 @@ def _make_layout_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🔵 Blue Canvas", callback_data="fmt:blue_canvas"),
             InlineKeyboardButton("🟣 Purple Canvas", callback_data="fmt:purple_canvas"),
         ],
-        [
-            InlineKeyboardButton("👤 Face Tracking", callback_data="fmt:face_crop"),
-        ],
-        [
-            InlineKeyboardButton("❌ Cancel", callback_data="wiz:cancel"),
-        ],
+    ]
+
+    # Face tracking is active for <=60s durations (0_30, 30_60, auto)
+    if target_duration in ("0_30", "30_60", "auto"):
+        buttons.insert(2, [
+            InlineKeyboardButton("👤 Face Tracking (Dynamic AI Cuts)", callback_data="fmt:face_crop"),
+        ])
+
+    buttons.append([
+        InlineKeyboardButton("❌ Cancel", callback_data="wiz:cancel"),
     ])
+    return InlineKeyboardMarkup(buttons)
 
 
 def _make_watermark_keyboard() -> InlineKeyboardMarkup:
@@ -110,15 +115,14 @@ def _make_clips_keyboard() -> InlineKeyboardMarkup:
 def _make_duration_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("⚡ Automatic (Recommended 25–60s)", callback_data="dur:auto"),
+            InlineKeyboardButton("🤖 Smart Auto (Recommended)", callback_data="dur:auto"),
         ],
         [
-            InlineKeyboardButton("⏱️ 0 to 30 Seconds", callback_data="dur:0_30"),
-            InlineKeyboardButton("⏱️ 15 to 30 Seconds", callback_data="dur:15_30"),
+            InlineKeyboardButton("⚡ 0 to 30 Seconds", callback_data="dur:0_30"),
+            InlineKeyboardButton("🎬 30 to 60 Seconds", callback_data="dur:30_60"),
         ],
         [
-            InlineKeyboardButton("⏱️ 30s to 1 Minute", callback_data="dur:30_60"),
-            InlineKeyboardButton("⏱️ 1 to 2 Minutes", callback_data="dur:60_120"),
+            InlineKeyboardButton("💰 61 to 90 Seconds (TikTok Monetized)", callback_data="dur:61_90"),
         ],
         [
             InlineKeyboardButton("↩️ Back to Clip Count", callback_data="wiz:back_clips"),

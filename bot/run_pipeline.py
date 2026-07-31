@@ -344,6 +344,15 @@ async def run_pipeline(
 
 
 
+        # Smart Auto Layout Routing based on Duration choice
+        if layout_mode in ("smart_auto", "quick_run", "auto"):
+            if target_duration == "61_90":
+                layout_mode = "pillarbox"
+                logger.info("Smart Auto: Selected 'pillarbox' (Black Canvas) for 61-90s TikTok Monetization clip")
+            else:
+                layout_mode = "face_crop"
+                logger.info("Smart Auto: Selected 'face_crop' (MediaPipe Face Tracking) for <=60s clip")
+
         # ── 5. Cut, Render & Composite ──────────────────────────────────────────
         await update_status(f"✂️ 5/5 — Compositing {len(moments)} Clips...")
         clips_dir = run_dir / "clips"

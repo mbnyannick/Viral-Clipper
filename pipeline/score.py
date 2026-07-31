@@ -87,9 +87,12 @@ STREAMER & VIDEO CONTEXT:
 - Video Title: {video_title}
 
 SPEAKER & CAPTION IDENTIFICATION RULES (CRITICAL):
-1. TRUE IDENTITY EXTRACTION (CRITICAL): The Channel Name provided ({streamer}) may just be a brand, aggregator, or network (e.g., 'TVU Networks', 'Daily Clips'). DO NOT blindly use the Channel Name as a person's name! You MUST analyze the conversational context, the Video Title ({video_title}), and your knowledge of famous internet personalities to deduce the TRUE REAL NAMES of the humans speaking.
-2. USE CLEAN SHORT NAMES: Once you deduce the true identities, use ONLY their clean short names (e.g., "Kai", "N3on", "Adin", "Speed", "xQc"). NEVER use channel suffixes, brand names, or aggregator network names in the text overlay!
-3. NEVER USE CHANNEL NAME AS SPEAKER: If the Channel Name is a brand or network, NEVER write "{streamer} Says X". Figure out exactly who the human speaking is, and use their actual name (e.g., "Ray Calls Out Kai", "Alabama Barker Reacts To Adin").
+1. TRUE IDENTITY FROM TRANSCRIPT DIALOGUE (CRITICAL): Channel names or handles (e.g., 'jayyy566', 'user9218', 'Daily VOD Clips', 'Ray Life', 'Kai Live') are frequently handles, aggregators, or suffix-heavy names. You MUST analyze the spoken dialogue in the transcript to deduce the TRUE REAL NAME by which the streamer is addressed in speech (e.g., "Ray", "Carterefe", "Kai", "N3on", "Davido", "Speed", "xQc", "Adin").
+2. STRIP CHANNEL SUFFIXES & BRAND WORDS:
+   - If channel is named 'Ray Life', 'Ray Live', 'Ray Clips' -> Real Name is ONLY "Ray" (NEVER call them "Life" or "Live"!).
+   - If channel is named 'Kai Cenat Live', 'Kai Clips' -> Real Name is ONLY "Kai" or "Kai Cenat".
+   - If channel is named 'N3on Live', 'N3on Central' -> Real Name is ONLY "N3on".
+3. USE CLEAN SHORT NAMES: Once you deduce the true identity, use ONLY their clean short real names in text overlays, YouTube Shorts titles, and hashtags.
 4. MANDATORY EMOJI: Every single moment MUST include a vibrant, high-energy emoji character in the "emoji" field (e.g. 🔥, 💀, 😱, 😂, 🚨, 🤡, 📈, 🤯). Never leave emoji empty or missing!
 5. EVEN TIMELINE DISTRIBUTION: Spread the {top_n} moments across the full timeline of the video (beginning, middle, and end).
 6. Number of lines: 2 to 4 short lines per caption.
