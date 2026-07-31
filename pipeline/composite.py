@@ -262,10 +262,7 @@ async def _composite_one(
         "-filter_complex", filter_complex,
         "-map", "[out]",
         "-map", a_map,
-        "-c:v", "libx264",
-        "-preset", "superfast",   # High-speed rendering preset (5x faster)
-        "-crf", "20",             # Crisp 1080p quality
-        "-threads", "4",          # Maximize CPU parallel core execution
+        *_get_v_encoder_args(),
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "192k",
@@ -302,10 +299,20 @@ async def _composite_one(
         except Exception:
             pass
 
-    return out_path if out_path.exists() else clip_path
+import sys
+
+_COMPOSITE_SEMAPHORE = asyncio.Semaphore(3)
 
 
-_COMPOSITE_SEMAPHORE = asyncio.Semaphore(1)
+def _get_v_encoder_args() -> list[str]:
+    if sys.platform == "darwin":
+        return ["-c:v", "h264_videotoolbox", "-b:v", "4500k"]
+    return [
+        "-c:v", "libx264",
+        "-preset", "superfast",
+        "-crf", "20",
+        "-threads", "4",
+    ]
 
 
 async def composite_clips(

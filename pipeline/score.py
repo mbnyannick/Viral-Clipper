@@ -188,9 +188,9 @@ async def score_moments(
 
     transcript_text = _format_transcript(segments)
 
-    models_to_try = [model, "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"]
+    models_to_try = [model, "deepseek-chat", "deepseek-reasoner"]
     seen = set()
-    models_to_try = [m for m in models_to_try if not (m in seen or seen.add(m))]
+    models_to_try = [m for m in models_to_try if m and not (m in seen or seen.add(m))]
 
     last_exc = None
     for m in models_to_try:
@@ -372,7 +372,7 @@ async def generate_clip_captions(
 
         try:
             resp = await client.chat.completions.create(
-                model="deepseek-v4-flash",
+                model="deepseek-chat",
                 messages=[
                     {"role": "system", "content": prompt.format(streamer=display_streamer, streamer_tag=streamer_tag)},
                     {"role": "user", "content": user_content},
@@ -420,7 +420,7 @@ async def normalize_streamer_name(
 
     try:
         resp = await client.chat.completions.create(
-            model="deepseek-v4-flash",
+            model="deepseek-chat",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=20,

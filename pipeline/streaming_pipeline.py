@@ -31,7 +31,7 @@ from pipeline.caption import render_captions
 from pipeline.composite import composite_clips
 from pipeline.download import extract_metadata, _get_cookie_opts, download_video_clip_range, YT_CLIENT_CHAINS, _kick_vod_get_hls_url
 from pipeline.errors import PipelineError
-from pipeline.score import Moment, score_moments
+from pipeline.score import Moment, score_moments, _generate_fallback_moments
 
 logger = logging.getLogger(__name__)
 
@@ -562,15 +562,15 @@ async def _process_window_parallel(
             streamer=streamer,
             video_title=video_title,
         )
-    except PipelineError as exc:
-        logger.warning("%s — scoring failed: %s. Skipping.", label, exc.reason)
-        tracker.analyzed += 1
-        return []
+    except Exception as exc:
+        logger.warning("%s — scoring failed (%s). Using fallback moment extraction.", label, exc)
+        moments = _generate_fallback_moments(segments, top_n=clips_per_window, streamer=streamer)
 
     tracker.analyzed += 1  # 🧠 Analyzing counter
 
     if not moments:
-        return []
+        logger.info("%s — no AI moments returned. Using fallback moment extraction.", label)
+        moments = _generate_fallback_moments(segments, top_n=clips_per_window, streamer=streamer)
 
     t_end = window_start + window_duration
     valid = [m for m in moments if window_start <= m.start < t_end and m.end > m.start]

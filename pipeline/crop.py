@@ -57,7 +57,7 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
         return "scale=720:1280"
 
     default_x = max(0, (width - crop_w) // 2)
-    step_frames = max(1, int(fps / 5))  # sample 5 frames per second
+    step_frames = max(1, int(fps))  # sample 1 frame per second for high-performance detection
 
     seats = [] # list of dicts: {"center_x": int, "frames": {frame_idx: metric}}
 
