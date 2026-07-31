@@ -46,7 +46,7 @@ _SYSTEM_EMOJI_PATHS = [
     "/System/Library/Fonts/Apple Color Emoji.ttc",
 ]
 
-_BITMAP_FALLBACK_SIZES = [109, 160, 128, 96, 64, 48, 40, 32, 20]
+_BITMAP_FALLBACK_SIZES = [40, 32, 48, 64, 20, 96, 109, 128, 160]
 
 
 def _is_emphasis(word: str) -> bool:
@@ -102,9 +102,20 @@ def _load_fonts(
     return normal_font, emphasis_font, emoji_font
 
 
+def _token_size(text: str, font: ImageFont.FreeTypeFont, is_emoji: bool = False) -> tuple[int, int]:
+    try:
+        bb = font.getbbox(text)
+        w, h = bb[2] - bb[0], bb[3] - bb[1]
+        if is_emoji:
+            w = max(w, EMOJI_SIZE)
+            h = max(h, EMOJI_SIZE)
+        return w, h
+    except Exception:
+        return (EMOJI_SIZE, EMOJI_SIZE) if is_emoji else (30, 30)
+
+
 def _token_bbox(text: str, font: ImageFont.FreeTypeFont) -> tuple[int, int]:
-    bb = font.getbbox(text)
-    return bb[2] - bb[0], bb[3] - bb[1]
+    return _token_size(text, font, is_emoji=False)
 
 
 def _wrap_tokens(
@@ -121,7 +132,7 @@ def _wrap_tokens(
 
     for token in tokens:
         text, font, is_emoji = token
-        tw, _ = (EMOJI_SIZE, EMOJI_SIZE) if is_emoji else _token_bbox(text, font)
+        tw, _ = _token_size(text, font, is_emoji)
 
         word_count = sum(1 for _, _, ie in current_line if not ie)
         added_w = tw if not current_line else WORD_GAP + tw
@@ -184,11 +195,11 @@ def render_caption(
     line_dims: list[tuple[int, int]] = []
     for line in line_tokens:
         w = sum(
-            ((EMOJI_SIZE, EMOJI_SIZE) if ie else _token_bbox(t, f))[0]
+            _token_size(t, f, ie)[0]
             for t, f, ie in line
         ) + WORD_GAP * (len(line) - 1)
         h = max(
-            (EMOJI_SIZE if ie else _token_bbox(t, f)[1])
+            _token_size(t, f, ie)[1]
             for t, f, ie in line
         )
         line_dims.append((w, h))
@@ -224,7 +235,7 @@ def render_caption(
         x = (CANVAS_W - line_w) // 2   # strictly centered horizontally
 
         for text, font, is_emoji in line:
-            token_w, token_h = (EMOJI_SIZE, EMOJI_SIZE) if is_emoji else _token_bbox(text, font)
+            token_w, token_h = _token_size(text, font, is_emoji)
             token_y = y + (line_h - token_h) // 2
 
             if is_emoji:
