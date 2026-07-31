@@ -192,21 +192,18 @@ def render_caption(
 
     line_tokens = _wrap_tokens(tokens, max_w=MAX_LINE_WIDTH, max_words_per_line=4)
 
+    FIXED_LINE_H = 44
+    LINE_STEP = 12
+    bg_pad_x = 24
+    bg_pad_y = 6
+
     line_dims: list[tuple[int, int]] = []
     for line in line_tokens:
         w = sum(
             _token_size(t, f, ie)[0]
             for t, f, ie in line
         ) + WORD_GAP * (len(line) - 1)
-        h = max(
-            _token_size(t, f, ie)[1]
-            for t, f, ie in line
-        )
-        line_dims.append((w, h))
-
-    LINE_STEP = 14
-    bg_pad_x = 24
-    bg_pad_y = 6
+        line_dims.append((w, FIXED_LINE_H))
 
     # 1. Compute total block height based on line dimensions and vertical gaps
     text_total_h = sum(h for _, h in line_dims) + LINE_STEP * max(0, len(line_dims) - 1)
@@ -233,7 +230,7 @@ def render_caption(
     for (line_w, line_h), line, x in zip(line_dims, line_tokens, line_offsets):
         for text, font, is_emoji in line:
             token_w, token_h = _token_size(text, font, is_emoji)
-            token_y = y + (line_h - token_h) // 2
+            token_y = y + (line_h - min(token_h, 40)) // 2
 
             if is_emoji:
                 try:
