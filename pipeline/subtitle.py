@@ -79,7 +79,7 @@ _PROFANITY_REPLACEMENTS = [
 def mask_profanity(text: str) -> str:
     """Sanitize explicit profanity for 100% FYP & algorithm safe text."""
     if not text:
-        return text
+        return ""
     res = text
     for pattern, replacement in _PROFANITY_REPLACEMENTS:
         def _replace_match(m):
@@ -89,9 +89,16 @@ def mask_profanity(text: str) -> str:
                 return rep.upper()
             if w.istitle():
                 return rep.capitalize()
-            return rep
         res = re.sub(pattern, _replace_match, res, flags=re.IGNORECASE)
     return res
+
+
+_GREEN_WORDS = {
+    "good", "great", "best", "win", "won", "winner", "success", "successful", "profit",
+    "money", "rich", "wealth", "wealthy", "happy", "joy", "love", "loved", "amazing",
+    "awesome", "perfect", "flawless", "easy", "free", "safe", "secure", "growth", "grow",
+    "fast", "quick", "smart", "genius", "brilliant", "yes", "yeah", "yep", "true", "facts", "exactly"
+}
 
 
 def _get_word_style(word: str) -> str | None:
