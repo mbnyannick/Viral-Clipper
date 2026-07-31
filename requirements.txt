@@ -10,7 +10,7 @@ google-auth-oauthlib>=1.2.0
 yt-dlp>=2024.1.1
 curl_cffi>=0.7.0        # Required for Kick.com Cloudflare TLS impersonation
 opencv-python-headless>=4.8.0
-mediapipe>=0.10.0      # Required for Active Speaker Detection (ASD) 3D Face Mesh
+mediapipe==0.10.14    # 0.10.x = last series with mp.solutions API; 1.0.0 removed it
 
 # Image rendering
 Pillow>=10.3.0         # >=9.2 required for embedded_color emoji rendering

@@ -29,7 +29,7 @@ from pathlib import Path
 
 from pipeline.caption import render_captions
 from pipeline.composite import composite_clips
-from pipeline.download import extract_metadata, _get_cookie_opts, download_video_clip_range, YT_CLIENT_CHAINS
+from pipeline.download import extract_metadata, _get_cookie_opts, download_video_clip_range, YT_CLIENT_CHAINS, _kick_vod_get_hls_url
 from pipeline.errors import PipelineError
 from pipeline.score import Moment, score_moments
 
@@ -69,10 +69,18 @@ async def _send_clip(bot, chat_id, clip_path: Path, caption: str) -> None:
 
 async def _get_hls_url(url: str) -> str:
     """
-    Resolve the raw HLS .m3u8 URL from a stream page URL using yt-dlp --get-url.
-    This is fast (~2s) and gives us a direct URL we can seek with ffmpeg -ss.
+    Resolve the raw HLS .m3u8 URL from a stream page URL.
+    - Kick VODs: use Kick API directly (yt-dlp always fails on kick VOD URLs).
+    - Everything else: use yt-dlp --get-url (~2s).
     """
     u_lower = url.lower()
+
+    # ── Kick VOD fast path — bypass yt-dlp entirely ──────────────────────────
+    if "kick.com" in u_lower and "/videos/" in u_lower:
+        hls_url, _, _, _ = await _kick_vod_get_hls_url(url)
+        logger.info("Kick VOD HLS resolved via API: %s...", hls_url[:80])
+        return hls_url
+
     is_youtube = "youtu" in u_lower
     is_kick = "kick.com" in u_lower
     impersonate_opts = ["--impersonate", "chrome"] if is_kick else []

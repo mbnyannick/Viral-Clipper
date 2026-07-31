@@ -116,14 +116,11 @@ def _parse_kick_vod_id(url: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-async def _kick_vod_direct_download(
-    url: str,
-    video_path: Path,
-    audio_path: Path,
-) -> tuple[Path, Path, dict]:
+async def _kick_vod_get_hls_url(url: str) -> tuple[str, str, str, int]:
     """
-    Download a Kick VOD using Kick's API v2 (via curl_cffi TLS impersonate) + ffmpeg HLS.
-    Returns (video_path, audio_path, streamer_info).
+    Fetch the HLS playlist URL for a Kick VOD via Kick API v2.
+    Returns (hls_url, channel, title, duration_seconds).
+    Fast — no video download, just an API call.
     """
     channel, vod_id = _parse_kick_vod_id(url)
     if not channel or not vod_id:
@@ -160,13 +157,12 @@ async def _kick_vod_direct_download(
     for v in vods:
         vid_id = str(v.get("id", "")).lower()
         slug = str(v.get("slug", "")).lower()
-        uuid = str((v.get("video") or {}).get("uuid", "")).lower()
-        if vod_id_lower in (vid_id, slug, uuid) or slug.startswith(vod_id_lower) or vod_id_lower in slug:
+        uuid_val = str((v.get("video") or {}).get("uuid", "")).lower()
+        if vod_id_lower in (vid_id, slug, uuid_val) or slug.startswith(vod_id_lower) or vod_id_lower in slug:
             matched = v
             break
 
     if not matched:
-        # Fallback: take most recent VOD (page=1 limit=1)
         if vods:
             matched = vods[0]
             logger.warning("Kick VOD ID %s not found, using most recent VOD instead.", vod_id)
@@ -183,7 +179,20 @@ async def _kick_vod_direct_download(
     if isinstance(duration, int) and duration > 10000:
         duration = duration // 1000
 
-    logger.info("Kick VOD direct HLS: %s — %s (%ss)", channel, title, duration)
+    logger.info("Kick VOD HLS resolved: %s — %s (%ss)", channel, title, duration)
+    return hls_url, channel, title, int(duration)
+
+
+async def _kick_vod_direct_download(
+    url: str,
+    video_path: Path,
+    audio_path: Path,
+) -> tuple[Path, Path, dict]:
+    """
+    Download a Kick VOD using Kick's API v2 (via curl_cffi TLS impersonate) + ffmpeg HLS.
+    Returns (video_path, audio_path, streamer_info).
+    """
+    hls_url, channel, title, duration = await _kick_vod_get_hls_url(url)
 
     # Download via ffmpeg HLS directly
     video_path.parent.mkdir(parents=True, exist_ok=True)
@@ -207,7 +216,6 @@ async def _kick_vod_direct_download(
         timeout=3600.0,
     )
 
-    platform, content_type, live_status = detect_platform_and_type(url)
     streamer_info = {
         "streamer": channel.capitalize(),
         "title": title,
@@ -219,6 +227,7 @@ async def _kick_vod_direct_download(
         "effective_url": url,
     }
     return video_path, audio_path, streamer_info
+
 
 
 async def _kick_live_direct_download(

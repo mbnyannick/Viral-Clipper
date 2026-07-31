@@ -221,6 +221,47 @@ async def run_pipeline(
             )
             return
 
+        # ── Kick VOD Smart Scan Mode ─────────────────────────────────────────────
+        # Instead of downloading the full VOD (hours of data), we audio-scan the
+        # entire VOD in parallel 10-min chunks, find viral timestamps via AI, then
+        # download ONLY the video segments that scored highest. Much faster.
+        is_kick_vod = "kick.com" in url.lower() and "/videos/" in url.lower()
+        if is_kick_vod:
+            vod_dur_sec = duration_sec if duration_sec > 0 else 18000.0
+            vod_dur_display = dur_display
+            total_windows = max(1, int(vod_dur_sec / (streaming_chunk_min * 60)))
+
+            card_msg = (
+                f"🎬 **Video Details Identified:**\n"
+                f"• **Platform:** {platform}\n"
+                f"• **Live Status:** {live_status}\n"
+                f"• **Streamer:** {streamer_name}\n"
+                f"• **Title:** {video_title if video_title else 'N/A'}\n"
+                f"• **Duration:** {vod_dur_display}\n\n"
+                f"⚡ **Smart Scan Mode Active!**\n"
+                f"• Audio-scanning full VOD in {total_windows} parallel chunks\n"
+                f"• Only downloading the top viral segments\n"
+                f"• Estimated time: ~5–8 minutes ⚡"
+            )
+            await send_msg(card_msg)
+
+            notifier.stop()
+            active_run_status["step"] = f"Smart scan: {total_windows} parallel audio windows..."
+
+            await run_streaming_pipeline(
+                url=url,
+                bot=bot,
+                chat_id=chat_id,
+                run_dir=run_dir,
+                layout_mode=layout_mode,
+                stream_start_sec=0.0,
+                stream_end_sec=vod_dur_sec,
+                chunk_minutes=streaming_chunk_min,
+                clips_per_window=clips_per_window,
+            )
+            return
+
+
         # Send rich metadata preview card IMMEDIATELY to Telegram and track message object
         card_msg = (
             f"🎬 **Video Details Identified:**\n"
