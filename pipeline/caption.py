@@ -204,36 +204,33 @@ def render_caption(
         )
         line_dims.append((w, h))
 
-    text_total_h = sum(h for _, h in line_dims) + LINE_GAP * (max(0, len(line_dims) - 1))
+    LINE_STEP = 14
+    bg_pad_x = 24
+    bg_pad_y = 6
 
-    # 1. Compute total card dimensions based on max line width and total text height
-    max_line_w = max(w for w, _ in line_dims)
-    pad_x = 32
-    pad_y = 20
-    card_w = max_line_w + (pad_x * 2)
-    card_h = text_total_h + (pad_y * 2)
-
-    total_h = card_h + (PADDING_TOP * 2)
+    # 1. Compute total block height based on line dimensions and vertical gaps
+    text_total_h = sum(h for _, h in line_dims) + LINE_STEP * max(0, len(line_dims) - 1)
+    total_h = PADDING_TOP + text_total_h + PADDING_BOTTOM + (bg_pad_y * 2)
     total_h = max(total_h, 120)
 
     img = Image.new("RGBA", (CANVAS_W, total_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    card_left = (CANVAS_W - card_w) // 2
-    card_top = PADDING_TOP
+    line_offsets = [(CANVAS_W - lw) // 2 for lw, _ in line_dims]
 
-    # 2. Draw ONE single unified white container card box with rounded corners (Matching Image B)
-    draw.rounded_rectangle(
-        [(card_left, card_top), (card_left + card_w, card_top + card_h)],
-        radius=24,
-        fill=(255, 255, 255)
-    )
+    # 2. Pass 1: Draw custom, form-fitting padded white pills for each line to create an asymmetrical continuous block
+    y = PADDING_TOP + bg_pad_y
+    for (line_w, line_h), x in zip(line_dims, line_offsets):
+        draw.rounded_rectangle(
+            [(x - bg_pad_x, y - bg_pad_y), (x + line_w + bg_pad_x, y + line_h + bg_pad_y)],
+            radius=16,
+            fill=(255, 255, 255)
+        )
+        y += line_h + LINE_STEP
 
-    # 3. Render all text lines centered inside the single white card box
-    y = card_top + pad_y
-    for (line_w, line_h), line in zip(line_dims, line_tokens):
-        x = (CANVAS_W - line_w) // 2   # strictly centered horizontally
-
+    # 3. Pass 2: Render all text tokens in solid black cleanly over the white background block
+    y = PADDING_TOP + bg_pad_y
+    for (line_w, line_h), line, x in zip(line_dims, line_tokens, line_offsets):
         for text, font, is_emoji in line:
             token_w, token_h = _token_size(text, font, is_emoji)
             token_y = y + (line_h - token_h) // 2
@@ -256,7 +253,7 @@ def render_caption(
                 )
             x += token_w + WORD_GAP
 
-        y += line_h + LINE_GAP
+        y += line_h + LINE_STEP
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(output_path))
