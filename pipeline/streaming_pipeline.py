@@ -439,7 +439,7 @@ async def _download_hd_clip_from_hls(
     return output_path
 
 
-async def _process_window_parallel(
+async def _scan_and_score_window(
     *,
     hls_url: str,
     window_index: int,
@@ -447,32 +447,24 @@ async def _process_window_parallel(
     window_start: float,
     window_duration: float,
     window_dir: Path,
-    layout_mode: str,
     deepseek_api_key: str,
     deepseek_model: str,
     streamer: str,
     video_title: str,
-    clips_per_window: int,
-    watermark_path: Path,
-    bot,
-    chat_id,
-    global_clip_counter: list,
-    progress_counter: list,
     tracker: "_ProgressTracker",
-    stream_url: str = "",
-) -> list:
+) -> dict:
     """
-    Fully self-contained window processor. Runs concurrently with all other windows.
-    Each window seeks to a different position in the HLS DVR — guaranteed unique content.
+    Phase 1: Audio-scan window, transcribe with Deepgram, and score candidate moments.
+    Fast parallel execution across the full VOD timeline.
     """
     label = (
         f"Window {window_index + 1}/{total_windows} "
         f"({int(window_start // 60)}m–{int((window_start + window_duration) // 60)}m)"
     )
-    logger.info("=== [PARALLEL] Starting %s ===", label)
+    logger.info("=== [PARALLEL SCAN] Starting %s ===", label)
     window_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── 1. Download audio window via ffmpeg seek ────────────────────────────────────────
+    # ── 1. Audio Download ──────────────────────────────────────────────────────────
     audio_path = window_dir / "audio.m4a"
     audio_sem = _get_audio_sem()
     async with audio_sem:
@@ -483,30 +475,28 @@ async def _process_window_parallel(
                 duration_sec=window_duration,
                 output_path=audio_path,
             )
-        except PipelineError as exc:
-            logger.warning("%s — audio failed: %s. Skipping.", label, exc.reason)
+        except Exception as exc:
+            logger.warning("%s — audio download failed (%s). Skipping.", label, exc)
             tracker.scanned += 1
-            return []
+            return {"window_dir": window_dir, "segments": [], "moments": []}
 
     if not audio_path.exists() or audio_path.stat().st_size < 4096:
-        logger.warning("%s — audio too small/missing. Skipping.", label)
+        logger.warning("%s — audio missing/empty. Skipping.", label)
         tracker.scanned += 1
-        return []
+        return {"window_dir": window_dir, "segments": [], "moments": []}
 
-    logger.info("%s — audio ready: %.1f MB", label, audio_path.stat().st_size / 1e6)
-    tracker.scanned += 1  # 📡 Scanning counter
+    tracker.scanned += 1  # 📡 Scanned counter
 
-    # ── 2. Transcribe ───────────────────────────────────────────────────────────────
-    last_exc = None
-    data = None
+    # ── 2. Deepgram Transcription ──────────────────────────────────────────────────
     deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
     if not deepgram_api_key:
-        logger.warning("%s — DEEPGRAM_API_KEY not set. Skipping.", label)
+        logger.warning("%s — DEEPGRAM_API_KEY missing. Skipping.", label)
         tracker.analyzed += 1
-        return []
+        return {"window_dir": window_dir, "segments": [], "moments": []}
 
     url = "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&utterances=true"
     headers = {"Authorization": f"Token {deepgram_api_key}"}
+    data = None
 
     try:
         import httpx
@@ -520,38 +510,29 @@ async def _process_window_parallel(
                     data = response.json()
                     break
                 except Exception as exc:
-                    last_exc = exc
-                    logger.warning("%s — transcription attempt %d/3 failed: %s", label, attempt, exc)
+                    logger.warning("%s — Deepgram attempt %d/3 failed: %s", label, attempt, exc)
                     if attempt < 3:
-                        await asyncio.sleep(attempt * 2.0)
-            if not data:
-                raise Exception(last_exc)
+                        await asyncio.sleep(attempt * 1.5)
     except Exception as exc:
-        logger.warning("%s — transcription fully failed: %s. Skipping.", label, exc)
+        logger.warning("%s — Deepgram transcription failed: %s", label, exc)
         tracker.analyzed += 1
-        return []
+        return {"window_dir": window_dir, "segments": [], "moments": []}
 
-    # Map Deepgram utterances to segments
-    raw_utterances = data.get("results", {}).get("utterances", [])
+    raw_utterances = (data or {}).get("results", {}).get("utterances", [])
     segments = []
-
     for utt in raw_utterances:
         utt_start = utt.get("start", 0.0)
         utt_end = utt.get("end", 0.0)
         utt_text = utt.get("transcript", "")
-
-        utt_words = []
-        for w in utt.get("words", []):
-            w_text = w.get("word", "").strip()
-            w_start = w.get("start", 0.0)
-            w_end = w.get("end", 0.0)
-            if w_text:
-                utt_words.append({
-                    "word": w_text,
-                    "start": round(w_start + window_start, 3),
-                    "end": round(w_end + window_start, 3),
-                })
-
+        utt_words = [
+            {
+                "word": w.get("word", "").strip(),
+                "start": round(w.get("start", 0.0) + window_start, 3),
+                "end": round(w.get("end", 0.0) + window_start, 3),
+            }
+            for w in utt.get("words", [])
+            if w.get("word", "").strip()
+        ]
         segments.append({
             "text": utt_text.strip(),
             "start": round(utt_start + window_start, 3),
@@ -560,39 +541,33 @@ async def _process_window_parallel(
         })
 
     if not segments:
-        logger.info("%s — silent/AFK. Skipping.", label)
+        logger.info("%s — quiet window.", label)
         tracker.analyzed += 1
-        return []
+        return {"window_dir": window_dir, "segments": [], "moments": []}
 
-    # ── 3. Score moments ────────────────────────────────────────────────────────────
+    # ── 3. Moment Scoring with Fallback Guarantee ──────────────────────────────────
     try:
         moments = await score_moments(
             segments=segments,
             api_key=deepseek_api_key,
-            top_n=clips_per_window,
+            top_n=1,
             model=deepseek_model,
             streamer=streamer,
             video_title=video_title,
         )
     except Exception as exc:
-        logger.warning("%s — scoring failed (%s). Using fallback moment extraction.", label, exc)
-        moments = _generate_fallback_moments(segments, top_n=clips_per_window, streamer=streamer)
-
-    tracker.analyzed += 1  # 🧠 Analyzing counter
+        logger.warning("%s — scoring failed (%s). Using speech density fallback.", label, exc)
+        moments = _generate_fallback_moments(segments, top_n=1, streamer=streamer)
 
     if not moments:
-        logger.info("%s — no AI moments returned. Using fallback moment extraction.", label)
-        moments = _generate_fallback_moments(segments, top_n=clips_per_window, streamer=streamer)
+        moments = _generate_fallback_moments(segments, top_n=1, streamer=streamer)
 
-    t_end = window_start + window_duration
-    valid = [m for m in moments if window_start <= m.start < t_end and m.end > m.start]
-    if not valid:
-        valid = moments
+    tracker.analyzed += 1  # 🧠 Analyzed counter
 
-    # Hard clamp: enforce 20s minimum, 60s maximum duration regardless of AI output
+    # Duration clamping (20s - 60s)
     MIN_DUR, MAX_DUR = 20.0, 60.0
     clamped = []
-    for m in valid:
+    for m in moments:
         start = m.start
         end = m.end
         dur = end - start
@@ -606,93 +581,16 @@ async def _process_window_parallel(
         clamped.append(Moment(
             index=m.index, start=start, end=end,
             caption_lines=m.caption_lines, emoji=m.emoji,
-            score=getattr(m, "score", 90),
-            reasoning=getattr(m, "reasoning", ""),
-            title=getattr(m, "title", ""),
-            bgm_track=getattr(m, "bgm_track", "none"),
-            sfx_events=getattr(m, "sfx_events", []),
-        ))
-    valid = clamped
-
-    # Assign globally unique indices
-    indexed = []
-    for m in valid:
-        idx = global_clip_counter[0]
-        global_clip_counter[0] += 1
-        indexed.append(Moment(
-            index=idx, start=m.start, end=m.end,
-            caption_lines=m.caption_lines, emoji=m.emoji,
-            score=getattr(m, "score", 90),
+            score=getattr(m, "score", 85),
             reasoning=getattr(m, "reasoning", ""),
             title=getattr(m, "title", ""),
             bgm_track=getattr(m, "bgm_track", "none"),
             sfx_events=getattr(m, "sfx_events", []),
         ))
 
-    tracker.moments_found += len(indexed)  # ⬇️ Downloading counter
+    tracker.moments_found += len(clamped)
+    return {"window_dir": window_dir, "segments": segments, "moments": clamped}
 
-    # ── 4. Selective HD clip downloads via ffmpeg seek ───────────────────────────────
-    clips_dir = window_dir / "clips"
-    clips_dir.mkdir(exist_ok=True)
-    clip_paths = []
-    valid_for_render = []
-
-    sem = _get_hd_sem()
-
-    async def _dl_one(moment):
-        clip_out = clips_dir / f"clip_{moment.index:03d}.mp4"
-        dl_start = max(0.0, moment.start - 1.0)
-        dl_end = moment.end + 1.0
-        async with sem:
-            try:
-                await _download_hd_clip_from_hls(
-                    hls_url=hls_url,
-                    start_sec=dl_start,
-                    end_sec=dl_end,
-                    output_path=clip_out,
-                    stream_url=stream_url,
-                )
-                return clip_out, moment
-            except PipelineError as exc:
-                logger.warning("%s — HD clip failed idx %d: %s", label, moment.index, exc.reason)
-                return None, None
-
-    results = await asyncio.gather(*(_dl_one(m) for m in indexed))
-    for clip_out, moment in results:
-        if clip_out and moment:
-            clip_paths.append(clip_out)
-            valid_for_render.append(moment)
-
-    if not clip_paths:
-        logger.warning("%s — all HD downloads failed.", label)
-        return indexed
-
-    async def _on_single_clip_ready(final_path: Path, m: Moment) -> None:
-        clip_num = m.index + 1
-        mins = int(m.start // 60)
-        secs = int(m.start % 60)
-        await _send_clip(
-            bot, chat_id, final_path,
-            f"🎬 Clip {clip_num} • {streamer}  [{mins}m{secs:02d}s]",
-        )
-        tracker.delivered += 1
-        tracker.composited += 1
-
-    captions_dir = window_dir / "captions"
-    finals_dir = window_dir / "finals"
-
-    captions = await asyncio.get_event_loop().run_in_executor(
-        None, render_captions, valid_for_render, _ASSETS_DIR, captions_dir, layout_mode,
-    )
-
-    final_clips = await composite_clips(
-        clips=clip_paths, captions=captions, watermark_path=watermark_path,
-        moments=valid_for_render, output_dir=finals_dir, layout_mode=layout_mode,
-        segments=segments, on_clip_ready=_on_single_clip_ready,
-    )
-
-    logger.info("=== [PARALLEL] %s complete — %d clips delivered ===", label, len(final_clips))
-    return valid_for_render
 
 async def run_streaming_pipeline(
     url: str,
@@ -703,17 +601,15 @@ async def run_streaming_pipeline(
     stream_start_sec: float | None = None,
     stream_end_sec: float | None = None,
     chunk_minutes: int = 10,
-    clips_per_window: int = 1,
+    target_total_clips: int = 3,
+    campaign_brief: str = "",
+    target_duration: str = "auto",
 ) -> None:
     """
-    Process a stream URL by running ALL time windows in parallel.
-
-    For live streams with stream_start_sec=None / stream_end_sec=None,
-    automatically clips the LAST 60 minutes of the DVR buffer.
-
-    For VODs, pass explicit start/end seconds to target a specific range.
-
-    Total wall-clock time ≈ time for the slowest single window.
+    Global Top-N Selection Pipeline:
+    1. Quick parallel audio-scan across full VOD timeline.
+    2. Rank all candidate moments globally and pick ONLY the top target_total_clips (e.g., 3 clips total).
+    3. Render HD video, MediaPipe face tracking, and deliver clips to Telegram immediately as each finishes.
     """
     deepseek_api_key = os.environ["DEEPSEEK_API_KEY"]
     deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
@@ -722,7 +618,7 @@ async def run_streaming_pipeline(
     chunk_sec = chunk_minutes * 60.0
     watermark_path = _ASSETS_DIR / "watermark.png"
 
-    # ── Step 1: Resolve HLS URL (fast, ~2s) ──────────────────────────────────
+    # ── Step 1: Resolve HLS URL ──────────────────────────────────────────────
     try:
         hls_url = await _get_hls_url(url)
     except PipelineError as exc:
@@ -732,13 +628,12 @@ async def run_streaming_pipeline(
     # ── Step 2: Probe DVR duration ────────────────────────────────────────────
     dvr_duration = await _get_stream_duration(hls_url, stream_url=url)
 
-    # ── Step 3: Auto-calculate last 60 minutes if not specified ───────────────
     if stream_end_sec is None:
         stream_end_sec = dvr_duration if dvr_duration > 0 else chunk_sec * 6
     if stream_start_sec is None:
         stream_start_sec = max(0.0, stream_end_sec - clip_window_minutes * 60.0)
 
-    # ── Step 4: Metadata ──────────────────────────────────────────────────────
+    # ── Step 3: Extract Metadata ──────────────────────────────────────────────
     streamer_info = await extract_metadata(url)
     streamer = streamer_info.get("streamer", "Streamer")
     video_title = streamer_info.get("title", "")
@@ -752,65 +647,128 @@ async def run_streaming_pipeline(
 
     total = len(windows)
     total_mins = int((stream_end_sec - stream_start_sec) / 60)
-    dvr_hrs = dvr_duration / 3600 if dvr_duration > 0 else 0
 
     logger.info(
-        "PARALLEL pipeline: %d windows × %d min | stream range %.0fs–%.0fs | DVR: %.0fs",
-        total, chunk_minutes, stream_start_sec, stream_end_sec, dvr_duration,
+        "PARALLEL pipeline: %d windows × %d min | Target Clips: %d total",
+        total, chunk_minutes, target_total_clips,
     )
 
-    # Initialize live progress tracker card
     tracker = _ProgressTracker(
-        bot=bot,
-        chat_id=chat_id,
-        total_windows=total,
-        streamer=streamer,
-        title=video_title,
+        bot=bot, chat_id=chat_id, total_windows=total, streamer=streamer, title=video_title,
     )
     await tracker.start()
 
-    global_clip_counter = [0]
-    progress_counter = [0]
-
-    window_tasks = [
-        _process_window_parallel(
+    # ── Phase 1: Parallel Audio Scan & AI Moment Extraction ────────────────────
+    scan_tasks = [
+        _scan_and_score_window(
             hls_url=hls_url,
             window_index=i,
             total_windows=total,
             window_start=w_start,
             window_duration=min(chunk_sec, stream_end_sec - w_start),
             window_dir=run_dir / f"window_{i:03d}",
-            layout_mode=layout_mode,
             deepseek_api_key=deepseek_api_key,
             deepseek_model=deepseek_model,
             streamer=streamer,
             video_title=video_title,
-            clips_per_window=clips_per_window,
-            watermark_path=watermark_path,
-            bot=bot,
-            chat_id=chat_id,
-            global_clip_counter=global_clip_counter,
-            progress_counter=progress_counter,
             tracker=tracker,
-            stream_url=url,
         )
         for i, w_start in enumerate(windows)
     ]
 
-    all_results = await asyncio.gather(*window_tasks, return_exceptions=True)
+    scan_results = await asyncio.gather(*scan_tasks, return_exceptions=True)
 
-    all_moments = []
-    for r in all_results:
-        if isinstance(r, list):
-            all_moments.extend(r)
+    # ── Phase 2: Global Ranking & Slicing Top N Clips ─────────────────────────
+    all_candidate_moments = []
+    window_segments_map = {}
+
+    for r in scan_results:
+        if isinstance(r, dict) and r.get("moments"):
+            for m in r["moments"]:
+                all_candidate_moments.append((m, r["window_dir"], r["segments"]))
+                window_segments_map[id(m)] = r["segments"]
         elif isinstance(r, Exception):
-            logger.warning("Window raised exception: %s", r)
+            logger.warning("Scan window exception: %s", r)
 
-    total_delivered = global_clip_counter[0]
+    if not all_candidate_moments:
+        await tracker.stop("⚠️ No viral moments found in this stream/VOD.")
+        return
+
+    # Sort all candidate moments globally by virality score descending
+    all_candidate_moments.sort(key=lambda item: getattr(item[0], "score", 85), reverse=True)
+
+    # Slice ONLY the top target_total_clips (e.g. exactly 3 clips total for full 5h stream)
+    top_selected = all_candidate_moments[:target_total_clips]
+
+    # Re-assign clean 0-indexed indices for final delivery
+    final_moments_to_render = []
+    for idx, (m, wdir, segs) in enumerate(top_selected):
+        new_m = Moment(
+            index=idx, start=m.start, end=m.end,
+            caption_lines=m.caption_lines, emoji=m.emoji,
+            score=getattr(m, "score", 90),
+            reasoning=getattr(m, "reasoning", ""),
+            title=getattr(m, "title", ""),
+            bgm_track=getattr(m, "bgm_track", "none"),
+            sfx_events=getattr(m, "sfx_events", []),
+        )
+        final_moments_to_render.append((new_m, wdir, segs))
+
+    logger.info("Global Top-N selection: Picked top %d moments across %d windows", len(final_moments_to_render), total)
+
+    # ── Phase 3: Targeted HD Download, Compositing & Immediate Delivery ─────────
+    hd_sem = _get_hd_sem()
+    delivered_count = [0]
+
+    async def _render_and_deliver_one(moment: Moment, wdir: Path, segments: list[dict]):
+        clip_out = wdir / f"clip_{moment.index:03d}.mp4"
+        dl_start = max(0.0, moment.start - 1.0)
+        dl_end = moment.end + 1.0
+
+        async with hd_sem:
+            try:
+                await _download_hd_clip_from_hls(
+                    hls_url=hls_url, start_sec=dl_start, end_sec=dl_end, output_path=clip_out, stream_url=url,
+                )
+            except Exception as exc:
+                logger.warning("HD clip download failed idx %d: %s", moment.index, exc)
+                return
+
+        captions_dir = wdir / "captions"
+        finals_dir = wdir / "finals"
+
+        captions = await asyncio.get_event_loop().run_in_executor(
+            None, render_captions, [moment], _ASSETS_DIR, captions_dir, layout_mode,
+        )
+
+        async def _on_clip_done(final_path: Path, m: Moment) -> None:
+            clip_num = m.index + 1
+            mins = int(m.start // 60)
+            secs = int(m.start % 60)
+            await _send_clip(
+                bot, chat_id, final_path,
+                f"🎬 Clip {clip_num} • {streamer}  [{mins}m{secs:02d}s]",
+            )
+            delivered_count[0] += 1
+            tracker.delivered += 1
+            tracker.composited += 1
+
+        await composite_clips(
+            clips=[clip_out], captions=captions, watermark_path=watermark_path,
+            moments=[moment], output_dir=finals_dir, layout_mode=layout_mode,
+            segments=segments, on_clip_ready=_on_clip_done,
+        )
+
+    render_tasks = [
+        _render_and_deliver_one(m, wdir, segs) for m, wdir, segs in final_moments_to_render
+    ]
+    await asyncio.gather(*render_tasks, return_exceptions=True)
+
+    total_delivered = delivered_count[0]
     scope = "full VOD" if stream_start_sec == 0.0 else f"last {total_mins} minutes"
 
-    if not all_moments or total_delivered == 0:
-        await tracker.stop("⚠️ No viral moments found in this stream/VOD.")
+    if total_delivered == 0:
+        await tracker.stop("⚠️ Could not render target clips from this stream.")
         return
 
     final_card = (

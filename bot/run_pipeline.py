@@ -263,6 +263,7 @@ async def run_pipeline(
             if chat_id in active_run_status:
                 active_run_status[chat_id]["step"] = f"Smart scan: {total_windows} parallel audio windows..."
 
+            target_total = top_n_clips if top_n_clips > 0 else int(os.getenv("TOP_N_CLIPS", "10"))
             await run_streaming_pipeline(
                 url=url,
                 bot=bot,
@@ -272,7 +273,9 @@ async def run_pipeline(
                 stream_start_sec=0.0,
                 stream_end_sec=vod_dur_sec,
                 chunk_minutes=streaming_chunk_min,
-                clips_per_window=clips_per_window,
+                target_total_clips=target_total,
+                campaign_brief=campaign_brief,
+                target_duration=target_duration,
             )
             return
 
