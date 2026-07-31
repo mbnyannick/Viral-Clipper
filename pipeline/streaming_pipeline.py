@@ -50,7 +50,7 @@ def _get_hd_sem():
 def _get_audio_sem():
     global _AUDIO_DOWNLOAD_SEM
     if _AUDIO_DOWNLOAD_SEM is None:
-        _AUDIO_DOWNLOAD_SEM = asyncio.Semaphore(6)
+        _AUDIO_DOWNLOAD_SEM = asyncio.Semaphore(3)
     return _AUDIO_DOWNLOAD_SEM
 
 
@@ -164,13 +164,25 @@ class _ProgressTracker:
         self._task = asyncio.create_task(self._loop())
 
     async def _loop(self) -> None:
-        """Edit the progress message every 3 seconds until stopped."""
-        import time
+        """Edit progress card and send 1-minute heartbeat status messages."""
+        heartbeat_counter = 0
         while not self._stopped:
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
             if self._stopped:
                 break
             await self._edit()
+            heartbeat_counter += 5
+            if heartbeat_counter >= 60:
+                heartbeat_counter = 0
+                if not self._stopped:
+                    msg_text = (
+                        f"⏱️ <b>1-Minute Progress Update:</b>\n"
+                        f"• 📡 Audio Scanned: {self.scanned}/{self.total} windows\n"
+                        f"• 🧠 AI Analyzed: {self.analyzed}/{self.total} windows\n"
+                        f"• 🎯 Moments Found: {self.moments_found}\n"
+                        f"• 🚀 Clips Delivered: {self.delivered}"
+                    )
+                    await _send_safe(self.bot, self.chat_id, msg_text, parse_mode="HTML")
 
     async def _edit(self) -> None:
         if self._msg_id is None:
@@ -655,39 +667,29 @@ async def _process_window_parallel(
         logger.warning("%s — all HD downloads failed.", label)
         return indexed
 
-    # ── 5. Captions + compositing ──────────────────────────────────────────────────
+    async def _on_single_clip_ready(final_path: Path, m: Moment) -> None:
+        clip_num = m.index + 1
+        mins = int(m.start // 60)
+        secs = int(m.start % 60)
+        await _send_clip(
+            bot, chat_id, final_path,
+            f"🎬 Clip {clip_num} • {streamer}  [{mins}m{secs:02d}s]",
+        )
+        tracker.delivered += 1
+        tracker.composited += 1
+
     captions_dir = window_dir / "captions"
     finals_dir = window_dir / "finals"
 
     captions = await asyncio.get_event_loop().run_in_executor(
         None, render_captions, valid_for_render, _ASSETS_DIR, captions_dir, layout_mode,
     )
+
     final_clips = await composite_clips(
         clips=clip_paths, captions=captions, watermark_path=watermark_path,
         moments=valid_for_render, output_dir=finals_dir, layout_mode=layout_mode,
-        segments=segments,
+        segments=segments, on_clip_ready=_on_single_clip_ready,
     )
-
-    tracker.composited += len(final_clips)  # 🏞️ Finishing counter
-
-    # ── 6. Deliver ───────────────────────────────────────────────────────────────────
-    if final_clips:
-        await _send_safe(
-            bot, chat_id,
-            f"🎉 <b>Clips Ready! Delivering {len(final_clips)} clip(s) below...</b>",
-            parse_mode="HTML",
-        )
-
-    for i, final_path in enumerate(final_clips):
-        m = valid_for_render[i]
-        clip_num = m.index + 1
-        mins = int(m.start // 60)
-        secs = int(m.start % 60)
-        await _send_clip(
-            bot, chat_id, final_path,
-            f"🎬 Clip {clip_num} • {streamer}  [{mins}m{secs:02d}s]"
-        )
-        tracker.delivered += 1
 
     logger.info("=== [PARALLEL] %s complete — %d clips delivered ===", label, len(final_clips))
     return valid_for_render

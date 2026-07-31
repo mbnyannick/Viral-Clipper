@@ -12,6 +12,7 @@ Supports two layout modes:
 
 import asyncio
 import logging
+import typing
 from pathlib import Path
 
 from .crop import detect_crop_offset
@@ -326,15 +327,16 @@ async def composite_clips(
     enable_silence_cut: bool = True,
     enable_subtitles: bool = True,
     segments: list[dict] | None = None,
+    on_clip_ready: typing.Callable | None = None,
 ) -> list[Path]:
-    """Composite clips concurrently (up to 4 parallel FFmpeg tasks) for maximum processing speed."""
+    """Composite clips concurrently and support immediate per-clip delivery callbacks."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     async def _safe_composite(clip, cap_info, moment):
         cap_path, cap_h = cap_info
         async with _COMPOSITE_SEMAPHORE:
             try:
-                return await _composite_one(
+                res = await _composite_one(
                     clip,
                     cap_path,
                     cap_h,
@@ -348,7 +350,18 @@ async def composite_clips(
                 )
             except Exception as exc:
                 logger.warning("Clip %02d compositing exception (%s) — using source clip fallback", moment.index, exc)
-                return clip
+                res = clip
+
+            if on_clip_ready and res and Path(res).exists():
+                try:
+                    if asyncio.iscoroutinefunction(on_clip_ready):
+                        await on_clip_ready(Path(res), moment)
+                    else:
+                        on_clip_ready(Path(res), moment)
+                except Exception as callback_exc:
+                    logger.warning("on_clip_ready callback failed for clip %02d: %s", moment.index, callback_exc)
+
+            return res
 
     results = await asyncio.gather(
         *(_safe_composite(c, cap, m) for c, cap, m in zip(clips, captions, moments))
