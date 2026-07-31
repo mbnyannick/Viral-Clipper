@@ -135,40 +135,30 @@ class _ProgressTracker:
 
     def _render(self) -> str:
         import html
-        n = self.total
         s_name = html.escape(self.streamer)
-        t_name = html.escape(self.title[:28] + ("…" if len(self.title) > 28 else ""))
-        title_part = f" • {t_name}" if t_name else ""
+        t_name = html.escape(self.title[:32] + ("…" if len(self.title) > 32 else ""))
+        title_part = f"\n• <b>Title:</b> {t_name}" if t_name else ""
 
-        def _stage(icon: str, label: str, done: int, total: int, override: str = "") -> str:
-            if override:
-                return f"{icon} {label:<10} {override}"
-            bar = self._bar(done, total)
-            if done >= total:
-                return f"{icon} {label:<10} {bar}  {done}/{total} ✅"
-            return f"{icon} {label:<10} {bar}  {done}/{total}"
-
-        # Stage 3: downloading/compositing
-        if self.moments_found > 0:
-            dl_override = f"🎯 {self.moments_found} moment{'s' if self.moments_found != 1 else ''} found"
+        # Step calculation:
+        if self.delivered > 0:
+            step_text = f"🚀 5/5 — Delivering Clips ({self.delivered} sent)..."
+        elif self.composited > 0:
+            step_text = f"🏞️ 4/5 — Compositing Video Clips ({self.composited} ready)..."
+        elif self.moments_found > 0:
+            step_text = f"✂️ 3/5 — Extracting Top HD Segments ({self.moments_found} moments found)..."
+        elif self.analyzed > 0:
+            step_text = f"🧠 2/5 — AI Analyzing Virality & Story Arc..."
         else:
-            dl_override = "Waiting…" if self.analyzed < n else "None found"
+            step_text = f"📥 1/5 — Audio Scanning Stream..."
 
-        finish_override = (
-            f"{self.composited} clip{'s' if self.composited != 1 else ''} ready"
-            if self.composited > 0 else "Waiting…"
+        card = (
+            f"🎬 <b>Video Details Identified:</b>\n"
+            f"• <b>Streamer:</b> {s_name}"
+            f"{title_part}\n\n"
+            f"⚙️ <b>Live Progress:</b> {step_text}\n\n"
+            f"☕ Feel free to step away while I process your clips!"
         )
-
-        lines = [
-            f"🎬 <b>Processing {s_name}</b>{title_part}",
-            "<pre>",
-            _stage("📡", "Scanning", self.scanned, n),
-            _stage("🧠", "Analyzing", self.analyzed, n),
-            f"⬇️ {'Download':<10} {dl_override}",
-            f"🏞️ {'Finishing':<10} {finish_override}",
-            "</pre>",
-        ]
-        return "\n".join(lines)
+        return card
 
     # ───────────────────────────────────────────────────────────────────────────
     async def start(self) -> None:
