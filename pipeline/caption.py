@@ -200,20 +200,29 @@ def render_caption(
 
     img = Image.new("RGBA", (CANVAS_W, total_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
+
+    # 1. First compute line X positions and bounding box for the entire text block
+    line_offsets = []
+    for line_w, _ in line_dims:
+        x = (CANVAS_W - line_w) // 2
+        line_offsets.append(x)
+
+    bg_pad_x = 24
+    bg_pad_y = 12
+
+    # 2. Draw unified rounded background pill for each line cleanly without vertical overlap
     y = PADDING_TOP
-
-    for (line_w, line_h), line in zip(line_dims, line_tokens):
-        x = (CANVAS_W - line_w) // 2   # strictly centered
-
-        # Draw the white background bubble for the current line to form an irregular shape
-        bg_pad_x = 20
-        bg_pad_y = 10
+    for (line_w, line_h), x in zip(line_dims, line_offsets):
         draw.rounded_rectangle(
-            [(x - bg_pad_x, y - bg_pad_y), (x + line_w + bg_pad_x, y + line_h + bg_pad_y)],
-            radius=16,
+            [(x - bg_pad_x, y - 2), (x + line_w + bg_pad_x, y + line_h + 2)],
+            radius=12,
             fill=(255, 255, 255)
         )
+        y += line_h + LINE_GAP
 
+    # 3. Draw text tokens cleanly over the white background
+    y = PADDING_TOP
+    for (line_w, line_h), line, x in zip(line_dims, line_tokens, line_offsets):
         for text, font, is_emoji in line:
             token_w, token_h = (EMOJI_SIZE, EMOJI_SIZE) if is_emoji else _token_bbox(text, font)
             token_y = y + (line_h - token_h) // 2

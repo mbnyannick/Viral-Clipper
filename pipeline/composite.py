@@ -186,7 +186,7 @@ async def _composite_one(
         elif "grey" in layout_mode or "gray" in layout_mode:
             bg_color = "#1a1a1a"  # Dark Charcoal Grey
 
-        cap_y = max(15, video_top_y - caption_height - 15)
+        cap_y = max(60, video_top_y - caption_height - 20)
         logger.info(
             "  Compositing clip %02d (%s 720x1280, color=%s, caption_y=%d, wm_y=%d, speed=1.10x, sub=%s)",
             moment.index, layout_mode, bg_color, cap_y, wm_y, enable_subtitles,
