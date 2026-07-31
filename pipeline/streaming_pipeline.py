@@ -306,6 +306,7 @@ async def _process_window_parallel(
     bot,
     chat_id,
     global_clip_counter: list,
+    progress_counter: list,
     stream_url: str = "",
 ) -> list:
     """
@@ -334,9 +335,19 @@ async def _process_window_parallel(
 
     if not audio_path.exists() or audio_path.stat().st_size < 4096:
         logger.warning("%s — audio too small/missing. Skipping.", label)
+        progress_counter[0] += 1
         return []
 
     logger.info("%s — audio ready: %.1f MB", label, audio_path.stat().st_size / 1e6)
+
+    # Report scan progress every 5 windows (or on the last one)
+    progress_counter[0] += 1
+    done = progress_counter[0]
+    if done % 5 == 0 or done == total_windows:
+        await _send_safe(
+            bot, chat_id,
+            f"🔍 Scanned {done}/{total_windows} chunks — AI searching for viral moments..."
+        )
 
     # ── 2. Transcribe ─────────────────────────────────────────────────────────
     last_exc = None
@@ -509,7 +520,9 @@ async def _process_window_parallel(
     # ── 6. Deliver immediately ────────────────────────────────────────────────
     for i, final_path in enumerate(final_clips):
         m = valid_for_render[i]
-        await _send_clip(bot, chat_id, final_path, f"🎬 {label} · Clip {m.index + 1}")
+        clip_num = global_clip_counter[0] - len(final_clips) + i
+        await _send_safe(bot, chat_id, f"🎯 Found a viral moment at {int(m.start // 60)}m{int(m.start % 60):02d}s — compositing clip...")
+        await _send_clip(bot, chat_id, final_path, f"🎬 Clip {clip_num + 1} · {streamer}")
 
     logger.info("=== [PARALLEL] %s complete — %d clips delivered ===", label, len(final_clips))
     return valid_for_render
@@ -603,6 +616,7 @@ async def run_streaming_pipeline(
     )
 
     global_clip_counter = [0]
+    progress_counter = [0]
 
     window_tasks = [
         _process_window_parallel(
@@ -622,6 +636,7 @@ async def run_streaming_pipeline(
             bot=bot,
             chat_id=chat_id,
             global_clip_counter=global_clip_counter,
+            progress_counter=progress_counter,
             stream_url=url,
         )
         for i, w_start in enumerate(windows)
@@ -641,7 +656,8 @@ async def run_streaming_pipeline(
         return
 
     total_delivered = global_clip_counter[0]
+    scope = "full VOD" if stream_start_sec == 0.0 else f"last {total_mins} minutes"
     await _send_safe(
         bot, chat_id,
-        f"✅ Done! {total_delivered} clip(s) delivered from the last {total_mins} minutes.",
+        f"✅ Done! {total_delivered} clip(s) delivered from the {scope}.",
     )
