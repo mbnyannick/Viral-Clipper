@@ -209,53 +209,8 @@ async def _composite_one(
         "-i", str(norm_wm_path),
     ]
 
-    af_chain = ["[0:a]atempo=1.10,volume=1.5[voice]"]
-    amix_inputs = ["[voice]"]
-    
-    input_count = 3  # We start with 3 inputs (clip, caption, watermark)
-    
-    # BGM
-    bgm_track = getattr(moment, "bgm_track", "none")
-    bgm_path = Path(__file__).parent.parent / "assets" / "audio" / "bgm" / f"{bgm_track}.mp3"
-    if bgm_track and bgm_track != "none" and bgm_path.exists():
-        bgm_idx = input_count
-        input_count += 1
-        inputs.extend(["-stream_loop", "-1", "-i", str(bgm_path)])
-        af_chain.append(f"[{bgm_idx}:a]volume=0.10[bgm]")
-        amix_inputs.append("[bgm]")
-        
-    # SFX
-    sfx_events = getattr(moment, "sfx_events", [])
-    if not sfx_events:
-        # Guarantee highly engaging SFX even if LLM fails to generate them
-        sfx_events = [
-            {"type": "whoosh", "time_offset": 0.2},
-            {"type": "boom", "time_offset": max(2.5, (moment.end - moment.start) * 0.3)} # 30% into the clip
-        ]
-        
-    for event in sfx_events:
-        sfx_type = event.get("type")
-        sfx_time = event.get("time_offset", 0.0)
-        sfx_path = Path(__file__).parent.parent / "assets" / "audio" / "sfx" / f"{sfx_type}.wav"
-        if sfx_path.exists():
-            sfx_idx = input_count
-            input_count += 1
-            inputs.extend(["-i", str(sfx_path)])
-            delay_ms = int((sfx_time / 1.10) * 1000)
-            # Volume increased to 2.5 so it pierces through the 1.5x voice audio
-            af_chain.append(f"[{sfx_idx}:a]adelay={delay_ms}|{delay_ms},volume=2.5[sfx{sfx_idx}]")
-            amix_inputs.append(f"[sfx{sfx_idx}]")
-            
-    # Combine audio
-    if len(amix_inputs) > 1:
-        mix_str = "".join(amix_inputs)
-        af_chain.append(f"{mix_str}amix=inputs={len(amix_inputs)}:duration=first:dropout_transition=2[aout]")
-        a_map = "[aout]"
-    else:
-        af_chain.append(f"[voice]anull[aout]")
-        a_map = "[aout]"
-        
-    filter_complex = f"{vf}; " + "; ".join(af_chain)
+    filter_complex = f"{vf}; [0:a]atempo=1.10,volume=1.5[outa]"
+    a_map = "[outa]"
 
     cmd = [
         "ffmpeg", "-y",

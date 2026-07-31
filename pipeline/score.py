@@ -117,9 +117,7 @@ Each object must have exactly these fields:
   "emoji"         — single relevant emoji character (e.g. 🔥, 💀, 😱, 😂, 🚨, 🤡)
   "score"         — integer, Viral potential score from 0 to 100
   "reasoning"     — string, a punchy 1-sentence explanation of exactly WHY this moment is highly viral
-  "title"         — string, A highly-clickable YouTube Shorts title (MAXIMUM 38 CHARACTERS). It MUST be 38 characters or less or it will get cut off on mobile!
-  "bgm_track"     — string, Background music vibe to play throughout the clip. MUST be one of: "hype", "suspense", "funny", "sad", or "none".
-  "sfx_events"    — array of dicts, Sound effects to play at specific moments. Each dict MUST have "type" (one of "boom", "whoosh", "ding") and "time_offset" (float, seconds relative to the START of the clip, e.g. 2.5 means 2.5s after the clip begins).\
+  "title"         — string, A highly-clickable YouTube Shorts title (MAXIMUM 38 CHARACTERS). It MUST be 38 characters or less or it will get cut off on mobile!\
 """
 
 
