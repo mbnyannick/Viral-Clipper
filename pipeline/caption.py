@@ -3,15 +3,16 @@ Step 6 — Caption image rendering with Inter Font & Strict Text Width Calibrati
 
 Features:
 - Font: Inter-Medium for normal text, Inter-Bold for ALL CAPS punch word.
-- Calibration: MAX_LINE_WIDTH = 800px (140px side margins) on a 1080px canvas.
-  Text can NEVER exceed 800px width or touch screen edges.
-- Word Wrapping: Automatically wraps long captions into up to 5 short, well-balanced
-  centered lines (max 4-5 words per line).
-- Safe Emoji Fallback: Gracefully falls back to normal font if Noto Color Emoji is unavailable in Linux.
+- Line layout: Character-limit based wrapping (~22 chars/line). The last leftover
+  line goes at the BOTTOM with 2-3 emojis prepended in front of it.
+- Smooth organic background: GaussianBlur radius=12 + threshold=60 fuses all
+  line pills into one crack-free continuous silhouette. Pills also overlap by 2px
+  on top/bottom so there are zero gaps between adjacent lines.
+- Safe Emoji Fallback: Gracefully falls back to normal font if Noto Color Emoji
+  is unavailable on Linux.
 """
 
 import logging
-import re
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -24,20 +25,19 @@ logger = logging.getLogger(__name__)
 
 # ── Layout constants ────────────────────────────────────────────────────────────
 CANVAS_W: int = 720
-MAX_LINE_WIDTH: int = 580     # Expanded boundary for bold, high-impact text
-PADDING_TOP: int = 15
-PADDING_BOTTOM: int = 15
-LINE_GAP: int = 8
-WORD_GAP: int = 10
+PADDING_TOP: int = 18
+PADDING_BOTTOM: int = 18
+LINE_GAP: int = 8            # Tighter gap so blurred pills fuse with no cracks
+WORD_GAP: int = 9
 
-NORMAL_SIZE: int = 28        # Proportional, sleek font size for normal text
-EMPHASIS_SIZE: int = 30      # Bold font size for punch words
-EMOJI_SIZE: int = 28         # Emoji size matching text size
+NORMAL_SIZE: int = 28
+EMPHASIS_SIZE: int = 30
+EMOJI_SIZE: int = 28
 
-TEXT_COLOR = (255, 255, 255)     # Pure white text
-STROKE_COLOR = (0, 0, 0)         # Stroke disabled
-STROKE_WIDTH = 0                 # No black stroke outline
-BG_COLOR = (0, 0, 0, 0)          # 100% transparent background
+CHARS_PER_LINE: int = 22    # Character limit per line (triggers wrap)
+
+STROKE_COLOR = (0, 0, 0)
+STROKE_WIDTH = 0
 
 _SYSTEM_EMOJI_PATHS = [
     "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
@@ -50,7 +50,6 @@ _BITMAP_FALLBACK_SIZES = [28, 32, 24, 20, 40, 48, 64]
 
 
 def _is_emphasis(word: str) -> bool:
-    """Return True if *word* is the ALL CAPS punch word."""
     clean = word.strip(".,!?\"'")
     return bool(clean) and clean.isupper() and len(clean) > 1 and any(c.isalpha() for c in clean)
 
@@ -68,7 +67,6 @@ def _find_emoji_font(assets_dir: Path) -> str | None:
 def _load_fonts(
     assets_dir: Path,
 ) -> tuple[ImageFont.FreeTypeFont, ImageFont.FreeTypeFont, ImageFont.FreeTypeFont]:
-    """Load Inter Medium for normal text and Inter Bold for emphasis."""
     inter_bold = assets_dir / "fonts" / "Inter-Bold.ttf"
     bold_otf = assets_dir / "fonts" / "Bold.otf"
     bold_ttf = assets_dir / "fonts" / "Bold.ttf"
@@ -114,41 +112,49 @@ def _token_size(text: str, font: ImageFont.FreeTypeFont, is_emoji: bool = False)
         return (EMOJI_SIZE, EMOJI_SIZE) if is_emoji else (30, 30)
 
 
-def _token_bbox(text: str, font: ImageFont.FreeTypeFont) -> tuple[int, int]:
-    return _token_size(text, font, is_emoji=False)
+def _extract_emojis(emoji_str: str) -> list[str]:
+    """Extract up to 3 individual emoji characters from the emoji field."""
+    chars = [c for c in emoji_str if not c.isalnum() and not c.isspace()]
+    if not chars:
+        chars = [emoji_str] if emoji_str.strip() else []
+    return chars[:3]
 
 
-def _wrap_tokens(
-    tokens: list[tuple[str, ImageFont.FreeTypeFont, bool]],
-    max_w: int,
-    max_words_per_line: int = 4,
-) -> list[list[tuple[str, ImageFont.FreeTypeFont, bool]]]:
+def _split_text_lines(words: list[str], chars_per_line: int = CHARS_PER_LINE) -> tuple[list[list[str]], list[str]]:
     """
-    Wrap tokens into lines such that no line exceeds max_w or max_words_per_line.
+    Wrap words into lines by character count.
+    Returns (main_lines, remainder) where remainder is the last short line
+    that will have emojis prepended.
     """
-    lines: list[list[tuple[str, ImageFont.FreeTypeFont, bool]]] = []
-    current_line: list[tuple[str, ImageFont.FreeTypeFont, bool]] = []
-    current_w = 0
+    lines: list[list[str]] = []
+    current: list[str] = []
+    current_chars = 0
 
-    for token in tokens:
-        text, font, is_emoji = token
-        tw, _ = _token_size(text, font, is_emoji)
-
-        word_count = sum(1 for _, _, ie in current_line if not ie)
-        added_w = tw if not current_line else WORD_GAP + tw
-
-        if current_line and ((current_w + added_w > max_w) or (word_count >= max_words_per_line and not is_emoji)):
-            lines.append(current_line)
-            current_line = [token]
-            current_w = tw
+    for word in words:
+        added = len(word) if not current else len(word) + 1
+        if current and current_chars + added > chars_per_line:
+            lines.append(current)
+            current = [word]
+            current_chars = len(word)
         else:
-            current_line.append(token)
-            current_w += added_w
+            current.append(word)
+            current_chars += added
 
-    if current_line:
-        lines.append(current_line)
+    if current:
+        lines.append(current)
 
-    return lines[:5]
+    if len(lines) > 1:
+        remainder = lines.pop()
+    else:
+        remainder = lines.pop() if lines else []
+
+    return lines, remainder
+
+
+def _line_pixel_width(tokens: list[tuple]) -> int:
+    if not tokens:
+        return 0
+    return sum(_token_size(t, f, ie)[0] for t, f, ie in tokens) + WORD_GAP * (len(tokens) - 1)
 
 
 def render_caption(
@@ -163,15 +169,8 @@ def render_caption(
 ) -> int:
     """
     Render caption PNG for *moment*.
-    - blurred_frame (or default): Solid white card container with rounded corners and Inter-Bold black text.
-    - face_crop: Clean white text with 3px black stroke, transparent background (no card box).
     Returns the height of the generated image (pixels).
     """
-    is_face_crop = layout_mode == "face_crop"
-    
-    eff_text_color = text_color if text_color is not None else (0, 0, 0)
-    eff_stroke_color = stroke_color if stroke_color is not None else STROKE_COLOR
-    eff_stroke_width = stroke_width if stroke_width is not None else STROKE_WIDTH
     eff_include_emoji = True if include_emoji is None else include_emoji
 
     try:
@@ -179,68 +178,78 @@ def render_caption(
     except FileNotFoundError as exc:
         raise PipelineError("caption", str(exc)) from exc
 
-    tokens: list[tuple[str, ImageFont.FreeTypeFont, bool]] = []
     full_text = mask_profanity(" ".join(moment.caption_lines))
+    words = full_text.split()
 
-    if moment.emoji and eff_include_emoji:
-        tokens.append((moment.emoji, emoji_font, True))
+    # ── Build character-limit lines + remainder ─────────────────────────────────
+    main_word_lines, remainder_words = _split_text_lines(words, CHARS_PER_LINE)
 
-    for word in full_text.split():
-        # Gen Z style: Semi-bold for normal words, Heavy Inter-Bold for ALL CAPS punch words
-        font = emphasis_font if _is_emphasis(word) else normal_font
-        tokens.append((word, font, False))
+    def words_to_tokens(word_list: list[str]) -> list[tuple]:
+        return [
+            (w, emphasis_font if _is_emphasis(w) else normal_font, False)
+            for w in word_list
+        ]
 
-    line_tokens = _wrap_tokens(tokens, max_w=MAX_LINE_WIDTH, max_words_per_line=4)
+    line_groups: list[list[tuple]] = [words_to_tokens(wl) for wl in main_word_lines]
 
-    FIXED_LINE_H = 32
-    LINE_STEP = 10
-    bg_pad_x = 18
-    bg_pad_y = 5
+    # Remainder line: 2-3 emojis first, then leftover words
+    remainder_line: list[tuple] = []
+    if eff_include_emoji and moment.emoji:
+        for em in _extract_emojis(moment.emoji):
+            remainder_line.append((em, emoji_font, True))
+    remainder_line.extend(words_to_tokens(remainder_words))
+    if remainder_line:
+        line_groups.append(remainder_line)
 
-    line_dims: list[tuple[int, int]] = []
-    for line in line_tokens:
-        w = sum(
-            _token_size(t, f, ie)[0]
-            for t, f, ie in line
-        ) + WORD_GAP * (len(line) - 1)
-        line_dims.append((w, FIXED_LINE_H))
+    line_groups = line_groups[:5]
 
-    text_total_h = sum(h for _, h in line_dims) + LINE_STEP * max(0, len(line_dims) - 1)
-    total_h = PADDING_TOP + text_total_h + PADDING_BOTTOM + (bg_pad_y * 2)
-    total_h = max(total_h, 100)
+    # ── Measure ─────────────────────────────────────────────────────────────────
+    FIXED_LINE_H = 34
+    LINE_STEP = 8
+    bg_pad_x = 20
+    bg_pad_y = 8     # Generous vertical pad so adjacent pills overlap before blur
 
-    # 1. Create grayscale mask combining all line pills
+    line_widths = [_line_pixel_width(tg) for tg in line_groups]
+    n = len(line_groups)
+
+    text_total_h = FIXED_LINE_H * n + LINE_STEP * max(0, n - 1)
+    total_h = max(PADDING_TOP + bg_pad_y + text_total_h + bg_pad_y + PADDING_BOTTOM, 80)
+
+    # ── 1. Grayscale pill mask with slight overlap so blur fuses them fully ─────
     mask_img = Image.new("L", (CANVAS_W, total_h), 0)
     mask_draw = ImageDraw.Draw(mask_img)
 
-    line_offsets = [(CANVAS_W - lw) // 2 for lw, _ in line_dims]
-
     y = PADDING_TOP + bg_pad_y
-    for (line_w, line_h), x in zip(line_dims, line_offsets):
+    for lw in line_widths:
+        x = (CANVAS_W - lw) // 2
         mask_draw.rounded_rectangle(
-            [(x - bg_pad_x, y - bg_pad_y), (x + line_w + bg_pad_x, y + line_h + bg_pad_y)],
-            radius=12,
-            fill=255
+            [
+                (x - bg_pad_x, y - bg_pad_y - 3),                       # 3px extra top
+                (x + lw + bg_pad_x, y + FIXED_LINE_H + bg_pad_y + 3),   # 3px extra bottom
+            ],
+            radius=16,
+            fill=255,
         )
-        y += line_h + LINE_STEP
+        y += FIXED_LINE_H + LINE_STEP
 
-    # 2. Smoothly blur and threshold to fuse pills into ONE continuous organic dynamic silhouette
-    blurred = mask_img.filter(ImageFilter.GaussianBlur(radius=5))
-    smooth_mask = blurred.point(lambda p: 255 if p > 80 else 0)
+    # ── 2. Large blur + low threshold → single crack-free organic silhouette ───
+    blurred = mask_img.filter(ImageFilter.GaussianBlur(radius=12))
+    smooth_mask = blurred.point(lambda p: 255 if p > 60 else 0)
 
-    # 3. Create final canvas and paste solid white background using the smooth organic mask
+    # ── 3. White background through smooth mask ─────────────────────────────────
     img = Image.new("RGBA", (CANVAS_W, total_h), (0, 0, 0, 0))
     white_layer = Image.new("RGBA", (CANVAS_W, total_h), (255, 255, 255, 255))
     img.paste(white_layer, (0, 0), smooth_mask)
 
     draw = ImageDraw.Draw(img)
 
-    # 4. Render all text tokens centered in crisp solid black over the smooth white background
+    # ── 4. Render tokens ────────────────────────────────────────────────────────
     y = PADDING_TOP + bg_pad_y
-    for (line_w, line_h), line, x in zip(line_dims, line_tokens, line_offsets):
-        for text, font, is_emoji in line:
+    for lw, line_tokens in zip(line_widths, line_groups):
+        x = (CANVAS_W - lw) // 2
+        for text, font, is_emoji in line_tokens:
             token_w, token_h = _token_size(text, font, is_emoji)
-            token_y = y + (line_h - min(token_h, 28)) // 2
+            token_y = y + (FIXED_LINE_H - min(token_h, FIXED_LINE_H)) // 2
 
             if is_emoji:
                 try:
@@ -251,22 +260,18 @@ def render_caption(
                     except Exception:
                         logger.warning("Emoji render failed for '%s'", text)
             else:
-                draw.text(
-                    (x, token_y),
-                    text,
-                    font=font,
-                    fill=(0, 0, 0),  # Crisp solid black text on white container
-                    stroke_width=0,
-                )
+                draw.text((x, token_y), text, font=font, fill=(0, 0, 0), stroke_width=0)
             x += token_w + WORD_GAP
 
-        y += line_h + LINE_STEP
+        y += FIXED_LINE_H + LINE_STEP
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(output_path))
-    logger.info("  Caption %02d: %s (%dpx tall, %d lines, mode=%s)", moment.index, output_path.name, total_h, len(line_tokens), layout_mode)
+    logger.info(
+        "  Caption %02d: %s (%dpx tall, %d lines, mode=%s)",
+        moment.index, output_path.name, total_h, len(line_groups), layout_mode,
+    )
     return total_h
-
 
 
 def render_captions(

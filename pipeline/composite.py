@@ -29,7 +29,7 @@ GAP_PX = 24
 _COMPOSITE_CONCURRENCY = 2
 
 
-async def _probe_video_position(clip_path: Path) -> tuple[int, int]:
+async def _probe_video_position(clip_path: Path, apply_4_3_crop: bool = False) -> tuple[int, int]:
     cmd = [
         "ffprobe", "-v", "quiet",
         "-select_streams", "v:0",
@@ -49,11 +49,40 @@ async def _probe_video_position(clip_path: Path) -> tuple[int, int]:
     except ValueError:
         w, h = 1920, 1080
 
-    scale = min(CANVAS_W / w, CANVAS_H / h)
-    scaled_h = int(h * scale)
+    if apply_4_3_crop:
+        # After center-cropping 16:9 → 4:3: effective width = h * 4/3
+        eff_w = int(h * 4 / 3)
+        eff_h = h
+    else:
+        eff_w, eff_h = w, h
+
+    scale = min(CANVAS_W / eff_w, CANVAS_H / eff_h)
+    scaled_h = int(eff_h * scale)
     video_top_y = (CANVAS_H - scaled_h) // 2
 
     return video_top_y, scaled_h
+
+
+
+def _probe_video_dims_filter(src_w: int, src_h: int, canvas_w: int, canvas_h: int) -> tuple[int, int]:
+    """Recalculate video_top_y / scaled_h for a 4:3 source placed in canvas."""
+    # After 16:9→4:3 crop: new dimensions are src_h*(4/3) x src_h
+    new_w = int(src_h * 4 / 3)
+    new_h = src_h
+    scale = min(canvas_w / new_w, canvas_h / new_h)
+    scaled_h = int(new_h * scale)
+    video_top_y = (canvas_h - scaled_h) // 2
+    return video_top_y, scaled_h
+
+
+def _get_4_3_crop_filter(src_w: int = 1920, src_h: int = 1080) -> str:
+    """Return FFmpeg vf snippet that center-crops a 16:9 source to 4:3.
+    The formula: new_w = src_h * 4 / 3, crop from center.
+    Works for any 16:9 resolution (1920x1080, 1280x720, etc.).
+    """
+    # We don't know exact source dims at filter-build time, so use expression-based crop:
+    # iw_4_3 = ih*4/3  → crop=ih*4/3:ih:(iw-ih*4/3)/2:0
+    return "crop=ih*4/3:ih:(iw-ih*4/3)/2:0"
 
 
 def _caption_y(video_top_y: int, caption_height: int) -> int:
@@ -113,7 +142,8 @@ async def _composite_one(
     _, wm_w, wm_h = prepare_watermark(watermark_path, norm_wm_path)
 
     # Position watermark logo centered horizontally, placed just below the video frame right above the username area
-    video_top_y, scaled_h = await _probe_video_position(clip_path)
+    use_4_3 = layout_mode not in ("face_crop",)
+    video_top_y, scaled_h = await _probe_video_position(clip_path, apply_4_3_crop=use_4_3)
     video_bottom_y = video_top_y + scaled_h
 
     wm_x = max(10, min((CANVAS_W - wm_w) // 2, CANVAS_W - wm_w - 10))
@@ -156,9 +186,10 @@ async def _composite_one(
                 f"[out2]null{sub_filter}[out]"
             )
     elif layout_mode == "blurred_frame":
+        crop_4_3 = _get_4_3_crop_filter()
         cap_y = max(15, video_top_y - caption_height - 15)
         logger.info(
-            "  Compositing clip %02d (blurred_frame 720x1280, caption_y=%d, wm_y=%d, speed=1.10x)",
+            "  Compositing clip %02d (blurred_frame 720x1280, 4:3 crop, caption_y=%d, wm_y=%d, speed=1.10x)",
             moment.index, cap_y, wm_y,
         )
         sub_filter = ""
@@ -168,7 +199,7 @@ async def _composite_one(
                 sub_filter = f",subtitles='{sf}':fontsdir=assets/fonts"
         vf = (
             f"[0:v]scale=108:192:force_original_aspect_ratio=increase,crop=108:192,boxblur=4:1,scale={CANVAS_W}:{CANVAS_H}[bg];"
-            f"[0:v]scale={CANVAS_W}:-2[fg];"
+            f"[0:v]{crop_4_3},scale={CANVAS_W}:-2[fg];"
             f"[bg][fg]overlay=0:{video_top_y},setpts=PTS/1.10[vbase];"
             f"[vbase][1:v]overlay=0:{cap_y}[v1];"
             f"[v1][2:v]overlay={wm_x}:{wm_y}[out2];"
@@ -196,8 +227,9 @@ async def _composite_one(
             sf, _ = build_word_subtitle_filter(segments, moment.start, moment.end, canvas_w=CANVAS_W, wm_y=wm_y, canvas_h=CANVAS_H)
             if sf:
                 sub_filter = f",subtitles='{sf}':fontsdir=assets/fonts"
+        crop_4_3 = _get_4_3_crop_filter()
         vf = (
-            f"[0:v]scale={CANVAS_W}:-2,pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color},setpts=PTS/1.10[vbase];"
+            f"[0:v]{crop_4_3},scale={CANVAS_W}:-2,pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color},setpts=PTS/1.10[vbase];"
             f"[vbase][1:v]overlay=0:{cap_y}[v1];"
             f"[v1][2:v]overlay={wm_x}:{wm_y}[out2];"
             f"[out2]null{sub_filter}[out]"

@@ -94,7 +94,7 @@ SPEAKER & CAPTION IDENTIFICATION RULES (CRITICAL):
    - If channel is named 'N3on Live', 'N3on Central' -> Real Name is ONLY "N3on".
 3. USE CLEAN SHORT NAMES: Once you deduce the true identity, use ONLY their clean short real names in text overlays, YouTube Shorts titles, and hashtags.
 4. PROFANITY MASKING (ALGORITHM SAFE): NEVER output raw un-censored swear words or explicit violence terms in caption_lines or title. Always sanitize explicit profanity using asterisks (e.g. "F**K", "K*LL", "SH*T", "B*TCH", "N***A").
-5. MANDATORY EMOJI: Every single moment MUST include a vibrant, high-energy emoji character in the "emoji" field (e.g. 🔥, 💀, 😱, 😂, 🚨, 🤡, 📈, 🤯). Never leave emoji empty or missing!
+5. MANDATORY EMOJIS (2 TO 3 EMOJIS): Every single moment MUST include 2 to 3 vibrant, high-energy emoji characters together in the "emoji" field (e.g. "🔥💀", "😱🚨", "😂🤡💀", "📈🤯🔥", "🚨😱🤡"). Never leave emoji empty or single!
 6. EVEN TIMELINE DISTRIBUTION: Spread the {top_n} moments across the full timeline of the video (beginning, middle, and end).
 7. Number of lines: 2 to 4 short lines per caption.
 8. Max words per line: 3 to 5 words per line maximum!
