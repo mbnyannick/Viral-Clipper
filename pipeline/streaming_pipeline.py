@@ -67,6 +67,134 @@ async def _send_clip(bot, chat_id, clip_path: Path, caption: str) -> None:
         logger.warning("Failed to deliver %s: %s", clip_path.name, exc)
 
 
+class _ProgressTracker:
+    """
+    Maintains a single Telegram message that is edited every 3 seconds with a
+    clean, user-friendly progress card. No technical details exposed.
+
+    Stages tracked:
+      1. 📡 Scanning   — audio download (one per window)
+      2. 🧠 Analyzing  — transcription + AI scoring
+      3. ⬇️ Downloading — HD clip segments for found moments
+      4. 🏞️ Finishing  — compositing + rendering
+    """
+
+    def __init__(self, bot, chat_id, total_windows: int, streamer: str, title: str) -> None:
+        self.bot = bot
+        self.chat_id = chat_id
+        self.total = total_windows
+        self.streamer = streamer
+        self.title = title
+
+        # Counters (all mutated from async coroutines — single-threaded asyncio, no lock needed)
+        self.scanned = 0
+        self.analyzed = 0
+        self.moments_found = 0
+        self.composited = 0
+        self.delivered = 0
+
+        self._msg_id: int | None = None
+        self._task: asyncio.Task | None = None
+        self._last_edit: float = 0.0
+        self._stopped = False
+
+    # ───────────────────────────────────────────────────────────────────────────
+    def _bar(self, count: int, total: int, width: int = 10) -> str:
+        """Render a simple block progress bar: ▓▓▓▓▓░░░░░"""
+        filled = round(count / max(total, 1) * width)
+        return "▓" * filled + "░" * (width - filled)
+
+    def _render(self) -> str:
+        n = self.total
+        title_part = f" • {self.title[:28]}…" if self.title and len(self.title) > 3 else ""
+
+        def _stage(icon: str, label: str, done: int, total: int, override: str = "") -> str:
+            if override:
+                return f"{icon} {label:<12} {override}"
+            pct = done / max(total, 1)
+            bar = self._bar(done, total)
+            if done >= total:
+                return f"{icon} {label:<12} {bar}  {done}/{total} ✅"
+            return f"{icon} {label:<12} {bar}  {done}/{total}"
+
+        # Stage 3: downloading/compositing
+        if self.moments_found > 0:
+            dl_override = f"🎯 {self.moments_found} moment{'s' if self.moments_found != 1 else ''} found"
+        else:
+            dl_override = "Waiting…" if self.analyzed < n else "None found"
+
+        finish_override = (
+            f"{self.composited} clip{'s' if self.composited != 1 else ''} ready"
+            if self.composited > 0 else "Waiting…"
+        )
+
+        lines = [
+            f"🎬 *Processing {self.streamer}*{title_part}",
+            "",
+            _stage("📡", "Scanning", self.scanned, n),
+            _stage("🧠", "Analyzing", self.analyzed, n),
+            f"⬇️ {'Downloading':<12} {dl_override}",
+            f"🏞️ {'Finishing':<12} {finish_override}",
+        ]
+        return "\n".join(lines)
+
+    # ───────────────────────────────────────────────────────────────────────────
+    async def start(self) -> None:
+        """Send the initial progress message and start the edit loop."""
+        try:
+            msg = await self.bot.send_message(
+                chat_id=self.chat_id,
+                text=self._render(),
+                parse_mode="Markdown",
+            )
+            self._msg_id = msg.message_id
+        except Exception as exc:
+            logger.warning("ProgressTracker: failed to send initial message: %s", exc)
+        self._task = asyncio.create_task(self._loop())
+
+    async def _loop(self) -> None:
+        """Edit the progress message every 3 seconds until stopped."""
+        import time
+        while not self._stopped:
+            await asyncio.sleep(3)
+            if self._stopped:
+                break
+            await self._edit()
+
+    async def _edit(self) -> None:
+        if self._msg_id is None:
+            return
+        try:
+            await self.bot.edit_message_text(
+                chat_id=self.chat_id,
+                message_id=self._msg_id,
+                text=self._render(),
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            # "Message is not modified" is expected when nothing changed — silently ignore
+            if "not modified" not in str(exc).lower():
+                logger.debug("ProgressTracker edit failed: %s", exc)
+
+    async def stop(self, final_text: str = "") -> None:
+        """Stop the edit loop and write the final state."""
+        self._stopped = True
+        if self._task and not self._task.done():
+            self._task.cancel()
+        if final_text and self._msg_id is not None:
+            try:
+                await self.bot.edit_message_text(
+                    chat_id=self.chat_id,
+                    message_id=self._msg_id,
+                    text=final_text,
+                    parse_mode="Markdown",
+                )
+            except Exception as exc:
+                logger.warning("ProgressTracker final edit failed: %s", exc)
+        elif self._msg_id is not None:
+            await self._edit()
+
+
 async def _get_hls_url(url: str) -> str:
     """
     Resolve the raw HLS .m3u8 URL from a stream page URL.
@@ -307,6 +435,7 @@ async def _process_window_parallel(
     chat_id,
     global_clip_counter: list,
     progress_counter: list,
+    tracker: "_ProgressTracker",
     stream_url: str = "",
 ) -> list:
     """
@@ -320,7 +449,7 @@ async def _process_window_parallel(
     logger.info("=== [PARALLEL] Starting %s ===", label)
     window_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── 1. Download audio window via ffmpeg seek ─────────────────────────────
+    # ── 1. Download audio window via ffmpeg seek ────────────────────────────────────────
     audio_path = window_dir / "audio.m4a"
     try:
         await _download_audio_window(
@@ -331,32 +460,26 @@ async def _process_window_parallel(
         )
     except PipelineError as exc:
         logger.warning("%s — audio failed: %s. Skipping.", label, exc.reason)
+        tracker.scanned += 1
         return []
 
     if not audio_path.exists() or audio_path.stat().st_size < 4096:
         logger.warning("%s — audio too small/missing. Skipping.", label)
-        progress_counter[0] += 1
+        tracker.scanned += 1
         return []
 
     logger.info("%s — audio ready: %.1f MB", label, audio_path.stat().st_size / 1e6)
+    tracker.scanned += 1  # 📡 Scanning counter
 
-    # Report scan progress every 5 windows (or on the last one)
-    progress_counter[0] += 1
-    done = progress_counter[0]
-    if done % 5 == 0 or done == total_windows:
-        await _send_safe(
-            bot, chat_id,
-            f"🔍 Scanned {done}/{total_windows} chunks — AI searching for viral moments..."
-        )
-
-    # ── 2. Transcribe ─────────────────────────────────────────────────────────
+    # ── 2. Transcribe ───────────────────────────────────────────────────────────────
     last_exc = None
     data = None
     deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
     if not deepgram_api_key:
         logger.warning("%s — DEEPGRAM_API_KEY not set. Skipping.", label)
+        tracker.analyzed += 1
         return []
-        
+
     url = "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&utterances=true"
     headers = {"Authorization": f"Token {deepgram_api_key}"}
 
@@ -380,17 +503,18 @@ async def _process_window_parallel(
                 raise Exception(last_exc)
     except Exception as exc:
         logger.warning("%s — transcription fully failed: %s. Skipping.", label, exc)
+        tracker.analyzed += 1
         return []
 
     # Map Deepgram utterances to segments
     raw_utterances = data.get("results", {}).get("utterances", [])
     segments = []
-    
+
     for utt in raw_utterances:
         utt_start = utt.get("start", 0.0)
         utt_end = utt.get("end", 0.0)
         utt_text = utt.get("transcript", "")
-        
+
         utt_words = []
         for w in utt.get("words", []):
             w_text = w.get("word", "").strip()
@@ -402,7 +526,7 @@ async def _process_window_parallel(
                     "start": round(w_start + window_start, 3),
                     "end": round(w_end + window_start, 3),
                 })
-        
+
         segments.append({
             "text": utt_text.strip(),
             "start": round(utt_start + window_start, 3),
@@ -412,9 +536,10 @@ async def _process_window_parallel(
 
     if not segments:
         logger.info("%s — silent/AFK. Skipping.", label)
+        tracker.analyzed += 1
         return []
 
-    # ── 3. Score moments ─────────────────────────────────────────────────────
+    # ── 3. Score moments ────────────────────────────────────────────────────────────
     try:
         moments = await score_moments(
             segments=segments,
@@ -426,7 +551,10 @@ async def _process_window_parallel(
         )
     except PipelineError as exc:
         logger.warning("%s — scoring failed: %s. Skipping.", label, exc.reason)
+        tracker.analyzed += 1
         return []
+
+    tracker.analyzed += 1  # 🧠 Analyzing counter
 
     if not moments:
         return []
@@ -444,11 +572,9 @@ async def _process_window_parallel(
         end = m.end
         dur = end - start
         if dur < MIN_DUR:
-            # Extend end (or pull start back) to reach minimum
             end = start + MIN_DUR
         elif dur > MAX_DUR:
             end = start + MAX_DUR
-        # Keep within window boundary
         if end > window_start + window_duration:
             end = window_start + window_duration
             start = max(window_start, end - MIN_DUR)
@@ -468,7 +594,9 @@ async def _process_window_parallel(
             caption_lines=m.caption_lines, emoji=m.emoji,
         ))
 
-    # ── 4. Selective HD clip downloads via ffmpeg seek ────────────────────────
+    tracker.moments_found += len(indexed)  # ⬇️ Downloading counter
+
+    # ── 4. Selective HD clip downloads via ffmpeg seek ───────────────────────────────
     clips_dir = window_dir / "clips"
     clips_dir.mkdir(exist_ok=True)
     clip_paths = []
@@ -504,7 +632,7 @@ async def _process_window_parallel(
         logger.warning("%s — all HD downloads failed.", label)
         return indexed
 
-    # ── 5. Captions + compositing ─────────────────────────────────────────────
+    # ── 5. Captions + compositing ──────────────────────────────────────────────────
     captions_dir = window_dir / "captions"
     finals_dir = window_dir / "finals"
 
@@ -517,16 +645,22 @@ async def _process_window_parallel(
         segments=segments,
     )
 
-    # ── 6. Deliver immediately ────────────────────────────────────────────────
+    tracker.composited += len(final_clips)  # 🏞️ Finishing counter
+
+    # ── 6. Deliver ───────────────────────────────────────────────────────────────────
     for i, final_path in enumerate(final_clips):
         m = valid_for_render[i]
-        clip_num = global_clip_counter[0] - len(final_clips) + i
-        await _send_safe(bot, chat_id, f"🎯 Found a viral moment at {int(m.start // 60)}m{int(m.start % 60):02d}s — compositing clip...")
-        await _send_clip(bot, chat_id, final_path, f"🎬 Clip {clip_num + 1} · {streamer}")
+        clip_num = m.index + 1
+        mins = int(m.start // 60)
+        secs = int(m.start % 60)
+        await _send_clip(
+            bot, chat_id, final_path,
+            f"🎬 Clip {clip_num} • {streamer}  [{mins}m{secs:02d}s]"
+        )
+        tracker.delivered += 1
 
     logger.info("=== [PARALLEL] %s complete — %d clips delivered ===", label, len(final_clips))
     return valid_for_render
-
 
 async def run_streaming_pipeline(
     url: str,
@@ -555,8 +689,6 @@ async def run_streaming_pipeline(
 
     chunk_sec = chunk_minutes * 60.0
     watermark_path = _ASSETS_DIR / "watermark.png"
-
-    await _send_safe(bot, chat_id, "🔍 Resolving stream URL and checking DVR buffer...")
 
     # ── Step 1: Resolve HLS URL (fast, ~2s) ──────────────────────────────────
     try:
@@ -590,30 +722,20 @@ async def run_streaming_pipeline(
     total_mins = int((stream_end_sec - stream_start_sec) / 60)
     dvr_hrs = dvr_duration / 3600 if dvr_duration > 0 else 0
 
-    # Tailor the message depending on whether we're scanning a full VOD or just a live DVR window
-    is_full_vod_scan = stream_start_sec == 0.0
-    if is_full_vod_scan:
-        scan_line = f"• Scanning full VOD ({total_mins} minutes total)"
-        dvr_line = f"• VOD duration: {dvr_hrs:.1f} hours"
-        eta_line = f"• Estimated time: ~5–8 minutes ⚡"
-    else:
-        scan_line = f"• Clipping last {total_mins} minutes of stream"
-        dvr_line = f"• DVR buffer: {dvr_hrs:.1f} hours available"
-        eta_line = f"• First clips arriving in ~10–12 minutes 🚀"
-
-    await _send_safe(
-        bot, chat_id,
-        f"⚡ Launching {total} windows IN PARALLEL\n"
-        f"{scan_line}\n"
-        f"{dvr_line}\n"
-        f"• {total} × {chunk_minutes}-min chunks downloading simultaneously\n"
-        f"{eta_line}",
-    )
-
     logger.info(
         "PARALLEL pipeline: %d windows × %d min | stream range %.0fs–%.0fs | DVR: %.0fs",
         total, chunk_minutes, stream_start_sec, stream_end_sec, dvr_duration,
     )
+
+    # Initialize live progress tracker card
+    tracker = _ProgressTracker(
+        bot=bot,
+        chat_id=chat_id,
+        total_windows=total,
+        streamer=streamer,
+        title=video_title,
+    )
+    await tracker.start()
 
     global_clip_counter = [0]
     progress_counter = [0]
@@ -637,6 +759,7 @@ async def run_streaming_pipeline(
             chat_id=chat_id,
             global_clip_counter=global_clip_counter,
             progress_counter=progress_counter,
+            tracker=tracker,
             stream_url=url,
         )
         for i, w_start in enumerate(windows)
@@ -651,13 +774,17 @@ async def run_streaming_pipeline(
         elif isinstance(r, Exception):
             logger.warning("Window raised exception: %s", r)
 
-    if not all_moments:
-        await _send_safe(bot, chat_id, "⚠️ No viral moments found in this time range.")
-        return
-
     total_delivered = global_clip_counter[0]
     scope = "full VOD" if stream_start_sec == 0.0 else f"last {total_mins} minutes"
-    await _send_safe(
-        bot, chat_id,
-        f"✅ Done! {total_delivered} clip(s) delivered from the {scope}.",
+
+    if not all_moments or total_delivered == 0:
+        await tracker.stop("⚠️ No viral moments found in this stream/VOD.")
+        return
+
+    final_card = (
+        f"✅ *Processing Complete!*\n"
+        f"• Delivered {total_delivered} clip(s) from {streamer}'s {scope}.\n"
+        f"• Enjoy your clips below!"
     )
+    await tracker.stop(final_card)
+
