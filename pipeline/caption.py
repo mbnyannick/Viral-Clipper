@@ -182,13 +182,13 @@ def render_caption(
     tokens: list[tuple[str, ImageFont.FreeTypeFont, bool]] = []
     full_text = mask_profanity(" ".join(moment.caption_lines))
 
+    if moment.emoji and eff_include_emoji:
+        tokens.append((moment.emoji, emoji_font, True))
+
     for word in full_text.split():
         # Gen Z style: Semi-bold for normal words, Heavy Inter-Bold for ALL CAPS punch words
         font = emphasis_font if _is_emphasis(word) else normal_font
         tokens.append((word, font, False))
-
-    if moment.emoji and eff_include_emoji:
-        tokens.append((moment.emoji, emoji_font, True))
 
     line_tokens = _wrap_tokens(tokens, max_w=MAX_LINE_WIDTH, max_words_per_line=4)
 
