@@ -59,8 +59,10 @@ async def _send_safe(bot, chat_id, text: str, parse_mode: str = "") -> None:
         kwargs = {"chat_id": chat_id, "text": text}
         if parse_mode:
             kwargs["parse_mode"] = parse_mode
-        await bot.send_message(**kwargs)
     except Exception as exc:
+        logger.warning("Telegram send failed: %s", exc)
+
+
 async def _check_audio_volume(audio_path: Path) -> float:
     """Run quick FFmpeg volumedetect filter to check mean audio volume in dB."""
     try:
