@@ -34,9 +34,13 @@ _VIDEO_BOT_Y: int = _VIDEO_TOP_Y + CANVAS_W * 3 // 4       # = 910
 _BOTTOM_LIMIT: int = int(CANVAS_H * 0.85)                   # = 1088 (clear of UI zone)
 
 # ── Typography ───────────────────────────────────────────────────────────────────
-TOP_FONT_SIZE: int = 56     # ~7.8% of CANVAS_W (hook line)
-BOT_FONT_SIZE: int = 46     # ~6.4% of CANVAS_W (payoff lines)
+TOP_FONT_SIZE: int = 48     # hook line — fits 3-5 words + trailing emoji
+BOT_FONT_SIZE: int = 40     # payoff lines — slightly smaller
 WORD_GAP: int = 8
+
+# Derived box heights (font + vertical padding top + bottom)
+_TOP_BOX_H: int = TOP_FONT_SIZE + 20   # PILL_PAD_Y * 2 = 10*2
+_BOT_BOX_H: int = BOT_FONT_SIZE + 20
 
 # ── Pill style ───────────────────────────────────────────────────────────────────
 PILL_ALPHA: int = 195       # ~76% opacity
@@ -132,13 +136,13 @@ def _make_tokens(
     normal_f: ImageFont.FreeTypeFont,
     emph_f: ImageFont.FreeTypeFont,
     emoji_f: ImageFont.FreeTypeFont,
-    prepend_emoji: str | None,
+    append_emoji: str | None,   # emoji goes at END of line, not front
 ) -> list[tuple]:
     toks: list[tuple] = []
-    if prepend_emoji:
-        toks.append((prepend_emoji, emoji_f, True))
     for word in text.split():
         toks.append((word, emph_f if _is_emphasis(word) else normal_f, False))
+    if append_emoji:            # append trailing emoji
+        toks.append((append_emoji, emoji_f, True))
     return toks
 
 
@@ -229,27 +233,34 @@ def render_caption(
 
     img = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
 
-    # ── TOP bar ──────────────────────────────────────────────────────────────────
+    # ── TOP bar: vertically centered in the upper blur bar (0 → _VIDEO_TOP_Y) ────
     em0 = emoji_chars[0] if emoji_chars else None
     top_tokens = _make_tokens(top_text, top_norm, top_emph, top_emoji, em0)
-    top_line_h = TOP_FONT_SIZE + PILL_PAD_Y * 2
-    top_y = max(10, _VIDEO_TOP_Y - top_line_h - 18)
+    # Center the pill vertically in the upper zone
+    top_text_y = (_VIDEO_TOP_Y - _TOP_BOX_H) // 2 + PILL_PAD_Y
+    top_text_y = max(PILL_PAD_Y + 6, top_text_y)
     if top_tokens:
-        _draw_pill_line(img, top_tokens, TOP_FONT_SIZE, top_y, TOP_FONT_SIZE)
+        _draw_pill_line(img, top_tokens, TOP_FONT_SIZE, top_text_y, TOP_FONT_SIZE)
 
-    # ── BOTTOM bars ──────────────────────────────────────────────────────────────
-    LINE_GAP = 14
-    bot_y = _VIDEO_BOT_Y + 18
+    # ── BOTTOM bars: vertically centered in the lower safe zone ──────────────────
+    BOT_LINE_GAP = 12
+    n_bot = len([bt for bt in bot_texts if bt.strip()])
+    total_bot_h = _BOT_BOX_H * n_bot + BOT_LINE_GAP * max(0, n_bot - 1)
+    bot_zone_h = _BOTTOM_LIMIT - _VIDEO_BOT_Y
+    # Center the group of bottom boxes in the safe zone below the video
+    bot_text_y = _VIDEO_BOT_Y + max(PILL_PAD_Y + 6, (bot_zone_h - total_bot_h) // 2) + PILL_PAD_Y
+
     for i, bt in enumerate(bot_texts):
+        if not bt.strip():
+            continue
         em = emoji_chars[i + 1] if (i + 1) < len(emoji_chars) else em0
         bot_tokens = _make_tokens(bt, bot_norm, bot_emph, bot_emoji, em)
         if not bot_tokens:
             continue
-        line_h = BOT_FONT_SIZE + PILL_PAD_Y * 2
-        if bot_y + line_h > _BOTTOM_LIMIT:
+        if bot_text_y + BOT_FONT_SIZE + PILL_PAD_Y > _BOTTOM_LIMIT:
             break
-        _draw_pill_line(img, bot_tokens, BOT_FONT_SIZE, bot_y, BOT_FONT_SIZE)
-        bot_y += line_h + LINE_GAP
+        _draw_pill_line(img, bot_tokens, BOT_FONT_SIZE, bot_text_y, BOT_FONT_SIZE)
+        bot_text_y += _BOT_BOX_H + BOT_LINE_GAP
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(output_path))
