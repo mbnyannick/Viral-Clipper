@@ -127,7 +127,8 @@ Each object must have exactly these fields:
 
 def _format_transcript(segments: list[dict]) -> str:
     """Convert segments list to a compact timestamped plain-text block."""
-    return "\n".join(f"[{seg['start']:.1f}s] {seg['text']}" for seg in segments)
+    lines = [f"[{seg['start']:.1f}s] {seg['text'].strip()}" for seg in segments if seg.get("text", "").strip()]
+    return "\n".join(lines[:150])
 
 
 def _parse_moments(raw: str) -> list[dict]:
@@ -315,9 +316,9 @@ async def generate_master_caption(
     if campaign_brief:
         system += f"\n\nCAMPAIGN BRIEF & HASHTAG REQUIREMENTS:\n{campaign_brief}\nEnsure mandatory hashtags and caption rules from the brief are applied."
 
-    models_to_try = [model, "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"]
+    models_to_try = [model, "deepseek-chat", "deepseek-reasoner"]
     seen = set()
-    models_to_try = [m for m in models_to_try if not (m in seen or seen.add(m))]
+    models_to_try = [m for m in models_to_try if m and not (m in seen or seen.add(m))]
 
     logger.info("Generating master caption for streamer '%s'", display_streamer)
     for m in models_to_try:
