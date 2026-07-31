@@ -53,12 +53,45 @@ _YELLOW_WORDS = {
 }
 
 
-_GREEN_WORDS = {
-    "good", "great", "best", "win", "won", "winner", "success", "successful", "profit",
-    "money", "rich", "wealth", "wealthy", "happy", "joy", "love", "loved", "amazing",
-    "awesome", "perfect", "flawless", "easy", "free", "safe", "secure", "growth", "grow",
-    "fast", "quick", "smart", "genius", "brilliant", "yes", "yeah", "yep", "true", "facts", "exactly"
-}
+_PROFANITY_REPLACEMENTS = [
+    (r"\bfucking\b", "f**king"),
+    (r"\bfucked\b", "f**ked"),
+    (r"\bfucker(s)?\b", "f**ker"),
+    (r"\bfuck(s)?\b", "f**k"),
+    (r"\bshitting\b", "sh*tting"),
+    (r"\bshit(s)?\b", "sh*t"),
+    (r"\bbitches\b", "b*tches"),
+    (r"\bbitch(ed|ing)?\b", "b*tch"),
+    (r"\bkilling\b", "k*lling"),
+    (r"\bkilled\b", "k*lled"),
+    (r"\bkill(s)?\b", "k*ll"),
+    (r"\bcunt(s)?\b", "c*nt"),
+    (r"\basshole(s)?\b", "a**hole"),
+    (r"\bdick(s)?\b", "d*ck"),
+    (r"\bpussy\b", "p*ssy"),
+    (r"\bnigga(s)?\b", "n***a"),
+    (r"\bnigger(s)?\b", "n***er"),
+    (r"\bretarded?\b", "r*tard"),
+    (r"\bbastard(s)?\b", "b*stard"),
+]
+
+
+def mask_profanity(text: str) -> str:
+    """Sanitize explicit profanity for 100% FYP & algorithm safe text."""
+    if not text:
+        return text
+    res = text
+    for pattern, replacement in _PROFANITY_REPLACEMENTS:
+        def _replace_match(m):
+            w = m.group(0)
+            rep = re.sub(pattern, replacement, w, flags=re.IGNORECASE)
+            if w.isupper():
+                return rep.upper()
+            if w.istitle():
+                return rep.capitalize()
+            return rep
+        res = re.sub(pattern, _replace_match, res, flags=re.IGNORECASE)
+    return res
 
 
 def _get_word_style(word: str) -> str | None:
@@ -120,9 +153,8 @@ def build_word_subtitle_filter(
                 continue
             rel_start = max(0.0, round((w_start - clip_start) / speed_factor, 3))
             rel_end = max(rel_start + 0.05, round((w_end - clip_start) / speed_factor, 3))
-            raw_w = _clean_word_text(w["word"])
+            raw_w = mask_profanity(_clean_word_text(w["word"]))
             if raw_w:
-                # Specs 2: Title Case text transformation
                 title_w = raw_w.capitalize()
                 words.append({
                     "word": _escape_ffmpeg_text(title_w),

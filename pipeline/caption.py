@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .errors import PipelineError
 from .score import Moment
+from .subtitle import mask_profanity
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,7 @@ def render_caption(
         raise PipelineError("caption", str(exc)) from exc
 
     tokens: list[tuple[str, ImageFont.FreeTypeFont, bool]] = []
-    full_text = " ".join(moment.caption_lines)
+    full_text = mask_profanity(" ".join(moment.caption_lines))
 
     for word in full_text.split():
         # Gen Z style: Semi-bold for normal words, Heavy Inter-Bold for ALL CAPS punch words

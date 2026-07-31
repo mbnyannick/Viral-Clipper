@@ -93,12 +93,13 @@ SPEAKER & CAPTION IDENTIFICATION RULES (CRITICAL):
    - If channel is named 'Kai Cenat Live', 'Kai Clips' -> Real Name is ONLY "Kai" or "Kai Cenat".
    - If channel is named 'N3on Live', 'N3on Central' -> Real Name is ONLY "N3on".
 3. USE CLEAN SHORT NAMES: Once you deduce the true identity, use ONLY their clean short real names in text overlays, YouTube Shorts titles, and hashtags.
-4. MANDATORY EMOJI: Every single moment MUST include a vibrant, high-energy emoji character in the "emoji" field (e.g. 🔥, 💀, 😱, 😂, 🚨, 🤡, 📈, 🤯). Never leave emoji empty or missing!
-5. EVEN TIMELINE DISTRIBUTION: Spread the {top_n} moments across the full timeline of the video (beginning, middle, and end).
-6. Number of lines: 2 to 4 short lines per caption.
-7. Max words per line: 3 to 5 words per line maximum!
-8. Title Case & ALL CAPS Punch Word: Every word starts with a Capital Letter. Exactly ONE key punch word per entire caption MUST be in ALL CAPS (e.g., MESSY, WILD, WRONG, COOKED, CRAZY, UNMATCHED, UNREAL, EXPOSED).
-9. DO NOT put the emoji inside caption_lines — it belongs in the "emoji" field only.
+4. PROFANITY MASKING (ALGORITHM SAFE): NEVER output raw un-censored swear words or explicit violence terms in caption_lines or title. Always sanitize explicit profanity using asterisks (e.g. "F**K", "K*LL", "SH*T", "B*TCH", "N***A").
+5. MANDATORY EMOJI: Every single moment MUST include a vibrant, high-energy emoji character in the "emoji" field (e.g. 🔥, 💀, 😱, 😂, 🚨, 🤡, 📈, 🤯). Never leave emoji empty or missing!
+6. EVEN TIMELINE DISTRIBUTION: Spread the {top_n} moments across the full timeline of the video (beginning, middle, and end).
+7. Number of lines: 2 to 4 short lines per caption.
+8. Max words per line: 3 to 5 words per line maximum!
+9. Title Case & ALL CAPS Punch Word: Every word starts with a Capital Letter. Exactly ONE key punch word per entire caption MUST be in ALL CAPS (e.g., MESSY, WILD, WRONG, COOKED, CRAZY, UNMATCHED, UNREAL, EXPOSED).
+10. DO NOT put the emoji inside caption_lines — it belongs in the "emoji" field only.
 
 NARRATIVE ARCS & CLIP DURATION RULES:
 10. PEAK VIRAL SELECTION: Choose only high-energy, emotionally intense, or genuinely hilarious moments. Avoid picking plain filler dialogue.

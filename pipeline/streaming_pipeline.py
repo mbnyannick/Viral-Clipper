@@ -32,6 +32,7 @@ from pipeline.composite import composite_clips
 from pipeline.download import extract_metadata, _get_cookie_opts, download_video_clip_range, YT_CLIENT_CHAINS, _kick_vod_get_hls_url
 from pipeline.errors import PipelineError
 from pipeline.score import Moment, score_moments, _generate_fallback_moments
+from pipeline.subtitle import mask_profanity
 
 logger = logging.getLogger(__name__)
 
@@ -764,7 +765,7 @@ async def run_streaming_pipeline(
             clip_num = m.index + 1
             mins = int(m.start // 60)
             secs = int(m.start % 60)
-            caption_title = " / ".join(m.caption_lines) if m.caption_lines else f"Clip {clip_num}"
+            caption_title = mask_profanity(" / ".join(m.caption_lines)) if m.caption_lines else f"Clip {clip_num}"
             emoji = getattr(m, "emoji", "🔥")
             clean_streamer = streamer if streamer else "Streamer"
             tag = "#" + re.sub(r"[^\w]", "", clean_streamer)
@@ -775,7 +776,8 @@ async def run_streaming_pipeline(
             )
             await _send_clip(bot, chat_id, final_path, video_caption)
 
-            yt_title = html.escape(getattr(m, "title", caption_title)) + f" {emoji} {tag} #Shorts #Viral"
+            raw_yt = getattr(m, "title", caption_title)
+            yt_title = html.escape(mask_profanity(raw_yt)) + f" {emoji} {tag} #Shorts #Viral"
             tt_title = html.escape(caption_title) + f" {emoji} {tag} #viral #fyp #streamer #highlights"
             ig_title = html.escape(caption_title) + f" {emoji} {tag} #reels #viral #explorepage #trending"
 
