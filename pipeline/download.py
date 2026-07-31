@@ -196,7 +196,7 @@ async def _kick_vod_direct_download(
         str(video_path),
     ]
     try:
-        await _run(cmd, step="download")
+        await _run(cmd, step="download", timeout=21600.0)  # 6h — covers capped 5h VODs + overhead
     except PipelineError as exc:
         raise PipelineError("download", f"ffmpeg HLS download failed: {exc.reason}") from exc
 
@@ -204,6 +204,7 @@ async def _kick_vod_direct_download(
     await _run(
         ["ffmpeg", "-y", "-i", str(video_path), "-vn", "-acodec", "copy", str(audio_path)],
         step="audio_extraction",
+        timeout=3600.0,
     )
 
     platform, content_type, live_status = detect_platform_and_type(url)
@@ -263,13 +264,14 @@ async def _kick_live_direct_download(
         str(video_path),
     ]
     try:
-        await _run(cmd, step="download")
+        await _run(cmd, step="download", timeout=5400.0)  # 90min — covers capped 1h live buffer + overhead
     except PipelineError as exc:
         raise PipelineError("download", f"ffmpeg HLS download failed: {exc.reason}") from exc
 
     await _run(
         ["ffmpeg", "-y", "-i", str(video_path), "-vn", "-acodec", "copy", str(audio_path)],
         step="audio_extraction",
+        timeout=3600.0,
     )
 
     platform, content_type, live_status = detect_platform_and_type(url)
@@ -458,7 +460,14 @@ async def extract_metadata(url: str) -> dict[str, str]:
 
     platform, content_type, live_status = detect_platform_and_type(url)
     err_msg = str(last_exc).lower() if last_exc else ""
-    is_offline = "offline" in err_msg or "not currently live" in err_msg or "404: not found" in err_msg
+    # Never mark Kick VOD/clip URLs as offline — they use a dedicated downloader
+    # that bypasses yt-dlp entirely, so yt-dlp errors are expected and irrelevant.
+    u_lower_check = url.lower()
+    is_kick_vod_or_clip = "kick.com" in u_lower_check and ("/videos/" in u_lower_check or "clips" in u_lower_check)
+    is_offline = (
+        not is_kick_vod_or_clip
+        and ("offline" in err_msg or "not currently live" in err_msg or "404: not found" in err_msg)
+    )
     if is_offline:
         live_status = "⚪ Streamer is OFFLINE right now"
 

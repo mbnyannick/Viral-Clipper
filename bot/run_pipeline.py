@@ -160,7 +160,7 @@ async def run_pipeline(
             notifier.stop()
             offline_msg = (
                 f"⚪ <b>{streamer_name} is currently offline.</b>\n\n"
-                f"Please send a <b>VOD link</b> or <b>Clip link</b> instead:\n"
+                f"Please send a <b>VOD link</b> instead:\n"
                 f"• Kick VOD: <code>https://kick.com/{streamer_name.lower()}/videos/XXXXXXXX</code>\n"
                 f"• Twitch VOD: <code>https://twitch.tv/videos/XXXXXXXX</code>"
             )
