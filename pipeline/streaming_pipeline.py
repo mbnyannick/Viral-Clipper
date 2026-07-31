@@ -61,7 +61,26 @@ async def _send_safe(bot, chat_id, text: str, parse_mode: str = "") -> None:
             kwargs["parse_mode"] = parse_mode
         await bot.send_message(**kwargs)
     except Exception as exc:
-        logger.warning("Telegram send failed: %s", exc)
+async def _check_audio_volume(audio_path: Path) -> float:
+    """Run quick FFmpeg volumedetect filter to check mean audio volume in dB."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-hide_banner", "-i", str(audio_path),
+            "-af", "volumedetect", "-f", "null", "/dev/null",
+            stderr=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
+        )
+        _, stderr = await proc.communicate()
+        err_text = stderr.decode(errors="replace")
+        for line in err_text.splitlines():
+            if "mean_volume:" in line:
+                parts = line.split("mean_volume:")
+                if len(parts) > 1:
+                    val_str = parts[1].replace("dB", "").strip()
+                    return float(val_str)
+    except Exception as exc:
+        logger.warning("Volume detect check failed: %s", exc)
+    return -20.0  # Default assume audible if detection fails
 
 
 async def _send_clip(bot, chat_id, clip_path: Path, caption: str) -> None:
@@ -485,6 +504,14 @@ async def _scan_and_score_window(
         tracker.scanned += 1
         return {"window_dir": window_dir, "segments": [], "moments": []}
 
+    # Audio volume pre-filter: skip silent/dead-static windows in 0.05s without API costs
+    mean_vol = await _check_audio_volume(audio_path)
+    if mean_vol < -50.0:
+        logger.info("%s — Audio window is silent (mean volume %.1f dB < -50 dB). Skipping APIs.", label, mean_vol)
+        tracker.scanned += 1
+        tracker.analyzed += 1
+        return {"window_dir": window_dir, "segments": [], "moments": []}
+
     tracker.scanned += 1  # 📡 Scanned counter
 
     # ── 2. Deepgram Transcription ──────────────────────────────────────────────────
@@ -745,10 +772,29 @@ async def run_streaming_pipeline(
             clip_num = m.index + 1
             mins = int(m.start // 60)
             secs = int(m.start % 60)
-            await _send_clip(
-                bot, chat_id, final_path,
-                f"🎬 Clip {clip_num} • {streamer}  [{mins}m{secs:02d}s]",
+            caption_title = " / ".join(m.caption_lines) if m.caption_lines else f"Clip {clip_num}"
+            emoji = getattr(m, "emoji", "🔥")
+            clean_streamer = streamer if streamer else "Streamer"
+            tag = "#" + re.sub(r"[^\w]", "", clean_streamer)
+
+            video_caption = (
+                f"🎬 <b>Clip {clip_num:02d}</b> • {clean_streamer} [{mins}m{secs:02d}s]\n"
+                f"<i>{html.escape(caption_title)} {emoji}</i>"
             )
+            await _send_clip(bot, chat_id, final_path, video_caption)
+
+            yt_title = html.escape(getattr(m, "title", caption_title)) + f" {emoji} {tag} #Shorts #Viral"
+            tt_title = html.escape(caption_title) + f" {emoji} {tag} #viral #fyp #streamer #highlights"
+            ig_title = html.escape(caption_title) + f" {emoji} {tag} #reels #viral #explorepage #trending"
+
+            card_text = (
+                f"📌 <b>Clip {clip_num:02d} Tap-To-Copy Metadata</b>\n\n"
+                f"🔴 <b>YouTube Shorts Title:</b>\n<code>{yt_title}</code>\n\n"
+                f"🎵 <b>TikTok Caption:</b>\n<code>{tt_title}</code>\n\n"
+                f"📸 <b>Instagram Reels Caption:</b>\n<code>{ig_title}</code>"
+            )
+            await _send_safe(bot, chat_id, card_text, parse_mode="HTML")
+
             delivered_count[0] += 1
             tracker.delivered += 1
             tracker.composited += 1
