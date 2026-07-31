@@ -31,20 +31,17 @@ _VIDEO_TOP_Y: int = (CANVAS_H - CANVAS_W * 3 // 4) // 2   # = 370
 _VIDEO_BOT_Y: int = _VIDEO_TOP_Y + CANVAS_W * 3 // 4       # = 910
 
 # ── Typography ────────────────────────────────────────────────────────────────
-FONT_SIZE: int   = 42        # Bold readable text; matches Image B proportions
-LINE_GAP: int    = 12        # Vertical gap between lines inside the box
-WORD_GAP: int    = 8
+FONT_SIZE: int   = 30        # Reduced — proportional to video content
+LINE_GAP: int    = 8
+WORD_GAP: int    = 7
 
 # ── Box style ────────────────────────────────────────────────────────────────
-BOX_BG       = (255, 255, 255, 245)  # near-opaque white (Image B style)
-BOX_RADIUS   = 16
-BOX_PAD_X    = 26            # horizontal padding inside box
-BOX_PAD_Y    = 18            # vertical padding inside box
-BOX_MIN_W    = int(CANVAS_W * 0.88)  # minimum box width = 88% of canvas (≈634px)
-TEXT_COLOR   = (10, 10, 10)  # near-black
-
-# Emphasis (ALL CAPS) words rendered bold in a vibrant yellow for maximum pop
-EMPHASIS_COLOR = (10, 10, 10)  # Keep same color — bold weight is the emphasis
+BOX_BG       = (255, 255, 255, 245)
+BOX_RADIUS   = 14
+BOX_PAD_X    = 20            # tighter horizontal padding
+BOX_PAD_Y    = 14            # tighter vertical padding
+BOX_MIN_W    = int(CANVAS_W * 0.68)  # 68% of canvas ≈ 490px
+TEXT_COLOR   = (10, 10, 10)
 
 # ── Box center positions ──────────────────────────────────────────────────────
 # Non-face-crop: 72% down the 4:3 video zone (chest area of speaker)
