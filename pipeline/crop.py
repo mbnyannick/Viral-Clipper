@@ -18,12 +18,14 @@ logger = logging.getLogger(__name__)
 try:
     import cv2
     import mediapipe as mp
-    # Verify solutions API is available (some architectures like ARM64 might lack it)
-    _ = mp.solutions.face_mesh
-    HAS_MEDIAPIPE = True
-except (ImportError, AttributeError) as e:
+    if hasattr(mp, "solutions") and hasattr(mp.solutions, "face_mesh"):
+        mp_face_mesh = mp.solutions.face_mesh
+        HAS_MEDIAPIPE = True
+    else:
+        HAS_MEDIAPIPE = False
+except Exception as e:
     HAS_MEDIAPIPE = False
-    logger.warning("MediaPipe Face Mesh not available (%s), falling back to static crop.", e)
+    logger.warning("MediaPipe Face Mesh not available (%s), using OpenCV HAAR face tracking fallback.", e)
 
 
 async def detect_crop_offset(clip_path: Path) -> str:
