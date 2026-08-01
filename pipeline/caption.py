@@ -31,23 +31,22 @@ _VIDEO_TOP_Y: int = (CANVAS_H - CANVAS_W * 3 // 4) // 2   # = 370
 _VIDEO_BOT_Y: int = _VIDEO_TOP_Y + CANVAS_W * 3 // 4       # = 910
 
 # ── Typography ────────────────────────────────────────────────────────────────
-FONT_SIZE: int   = 30        # Reduced — proportional to video content
+FONT_SIZE: int   = 32        # Clean readable size for top blur bar
 LINE_GAP: int    = 8
 WORD_GAP: int    = 7
 
 # ── Box style ────────────────────────────────────────────────────────────────
-BOX_BG       = (255, 255, 255, 245)
+BOX_BG       = (255, 255, 255, 245)  # crisp near-opaque white
 BOX_RADIUS   = 14
-BOX_PAD_X    = 20            # tighter horizontal padding
-BOX_PAD_Y    = 14            # tighter vertical padding
-BOX_MIN_W    = int(CANVAS_W * 0.68)  # 68% of canvas ≈ 490px
-TEXT_COLOR   = (10, 10, 10)
+BOX_PAD_X    = 22            # padding around text inside box
+BOX_PAD_Y    = 14
+TEXT_COLOR   = (10, 10, 10)  # dark text
 
 # ── Box center positions ──────────────────────────────────────────────────────
-# Non-face-crop: 72% down the 4:3 video zone (chest area of speaker)
-_BOX_CENTER_PILLARBOX: int = _VIDEO_TOP_Y + int((_VIDEO_BOT_Y - _VIDEO_TOP_Y) * 0.72)
-# face_crop: 68% down the full canvas (speaker fills frame)
-_BOX_CENTER_FACECROP: int  = int(CANVAS_H * 0.68)
+# Non-face-crop: Center of top blurry bar (Y=0..370 → center Y=185)
+_BOX_CENTER_PILLARBOX: int = 185
+# face_crop: Upper safe zone (Y=140)
+_BOX_CENTER_FACECROP: int  = 140
 
 _SYSTEM_EMOJI_PATHS = [
     "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
@@ -137,10 +136,15 @@ def _draw_white_card(
 ) -> None:
     """Render ONE white rounded-rect card containing all lines onto *img*."""
 
-    # ── Measure row widths (emoji appended to last row) ───────────────────────
+    # ── Measure row widths (emojis appended individually to last row) ───────
     rows = [list(row) for row in line_token_rows]  # copy
     if emoji_str and rows:
-        rows[-1].append((emoji_str, emoji_f, True))
+        # Split emoji string into individual emoji characters
+        emoji_chars = [c for c in emoji_str if not c.isalnum() and not c.isspace()]
+        if not emoji_chars and emoji_str.strip():
+            emoji_chars = [emoji_str.strip()]
+        for em in emoji_chars:
+            rows[-1].append((em, emoji_f, True))
 
     row_widths = [
         sum(_tok_w(t, f, ie) for t, f, ie in row) + WORD_GAP * max(0, len(row) - 1)
@@ -149,24 +153,22 @@ def _draw_white_card(
     n_lines    = len(rows)
     max_row_w  = max(row_widths) if row_widths else 0
 
-    # ── Box geometry ──────────────────────────────────────────────────────────
+    # ── Box geometry (tight shrinkwrap around text + padding) ──────────────────
     box_inner_w = max_row_w
     box_inner_h = FONT_SIZE * n_lines + LINE_GAP * max(0, n_lines - 1)
 
-    # Enforce minimum width (88% of canvas)
-    box_inner_w = max(box_inner_w, BOX_MIN_W - BOX_PAD_X * 2)
     box_w = box_inner_w + BOX_PAD_X * 2
     box_h = box_inner_h + BOX_PAD_Y * 2
 
     # Cap at canvas width with small margin
-    box_w = min(box_w, CANVAS_W - 20)
+    box_w = min(box_w, CANVAS_W - 24)
     box_inner_w = box_w - BOX_PAD_X * 2
 
     # Centered horizontally
     box_x0 = (CANVAS_W - box_w) // 2
     box_y0 = box_center_y - box_h // 2
-    # Clamp so box stays inside the canvas
-    box_y0 = max(20, min(box_y0, CANVAS_H - box_h - 20))
+    # Clamp so box stays within top area
+    box_y0 = max(15, min(box_y0, _VIDEO_TOP_Y - box_h - 10 if box_center_y < _VIDEO_TOP_Y else CANVAS_H - box_h - 20))
     box_x1 = box_x0 + box_w
     box_y1 = box_y0 + box_h
 
