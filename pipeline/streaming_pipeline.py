@@ -22,8 +22,10 @@ For each window (all running concurrently):
 """
 
 import asyncio
+import html
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 
