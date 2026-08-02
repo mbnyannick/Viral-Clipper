@@ -86,7 +86,12 @@ async def deliver_clips(
 
         action_keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("📱 1-Tap Mobile Upload", callback_data=f"pub:mobile:{i}"),
+                InlineKeyboardButton("🚀 Post to TikTok", callback_data=f"post:tiktok:{i}"),
+                InlineKeyboardButton("🔴 Post to YouTube", callback_data=f"post:youtube:{i}"),
+            ],
+            [
+                InlineKeyboardButton("📸 Post to IG Reels", callback_data=f"post:instagram:{i}"),
+                InlineKeyboardButton("🌐 Post to ALL", callback_data=f"post:all:{i}"),
             ]
         ])
 

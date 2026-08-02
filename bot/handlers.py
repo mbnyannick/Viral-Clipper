@@ -636,7 +636,61 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     data = query.data
     chat_id = update.effective_chat.id
 
-    # Handle Publishing Action Buttons
+    # Handle Publishing / Make.com Auto-Post Action Buttons (post:tiktok:1, post:youtube:1, post:instagram:1, post:all:1)
+    if data.startswith("post:"):
+        parts = data.split(":")
+        platform = parts[1]
+        clip_num = parts[2] if len(parts) > 2 else "1"
+
+        webhook_url = os.environ.get("MAKE_WEBHOOK_URL", "https://hook.us1.make.com/rprg1wxutz1xbnfefulz8e1569vnarzv").strip()
+        if not webhook_url:
+            await query.answer("⚠️ No Make.com Webhook URL set.", show_alert=True)
+            return
+
+        await query.answer(f"🚀 Sending Clip #{clip_num} to Make.com for {platform.upper()}!", show_alert=False)
+
+        msg = query.message
+        video_url = ""
+        caption_text = msg.caption if msg and msg.caption else f"Clip {clip_num}"
+        title_text = caption_text.split("\n")[0] if caption_text else f"Clip {clip_num}"
+
+        if msg and msg.video:
+            try:
+                tg_file = await context.bot.get_file(msg.video.file_id)
+                video_url = tg_file.file_path
+            except Exception as f_exc:
+                logger.warning("Could not get Telegram video download link: %s", f_exc)
+
+        payload = {
+            "platform": platform,
+            "clip_id": f"clip_{int(clip_num):03d}",
+            "title": title_text,
+            "caption": caption_text,
+            "video_url": video_url,
+            "hashtags": "#Shorts #Viral #TikTok #Reels",
+            "chat_id": chat_id,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
+        import aiohttp
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(webhook_url, json=payload, timeout=15) as resp:
+                    if resp.status in (200, 201, 202):
+                        await msg.reply_text(
+                            f"✅ **Sent to Make.com!**\n\n"
+                            f"• **Platform:** `{platform.upper()}`\n"
+                            f"• **Clip:** #{clip_num}\n"
+                            f"• **Status:** Webhook Triggered Successfully",
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await msg.reply_text(f"⚠️ Make.com returned HTTP status {resp.status}.")
+        except Exception as http_exc:
+            logger.error("Make.com webhook dispatch error: %s", http_exc)
+            await msg.reply_text(f"❌ Failed to reach Make.com webhook: {http_exc}")
+        return
+
     if data.startswith("pub:mobile:"):
         clip_num = data.split("pub:mobile:")[1]
         await query.answer(f"📱 1-Tap Mobile Upload for Clip #{clip_num}!", show_alert=True)

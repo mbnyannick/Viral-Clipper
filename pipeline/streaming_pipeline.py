@@ -29,6 +29,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
 from pipeline.caption import render_captions
 from pipeline.composite import composite_clips
 from pipeline.download import extract_metadata, _get_cookie_opts, download_video_clip_range, YT_CLIENT_CHAINS, _kick_vod_get_hls_url
@@ -88,12 +90,16 @@ async def _check_audio_volume(audio_path: Path) -> float:
     return -20.0  # Default assume audible if detection fails
 
 
-async def _send_clip(bot, chat_id, clip_path: Path, caption: str) -> None:
+async def _send_clip(bot, chat_id, clip_path: Path, caption: str, reply_markup=None) -> None:
     try:
         with open(clip_path, "rb") as fh:
-            await bot.send_video(
-                chat_id=chat_id, video=fh, caption=caption, supports_streaming=True,
-            )
+            kwargs = {
+                "chat_id": chat_id, "video": fh, "caption": caption,
+                "parse_mode": "HTML", "supports_streaming": True,
+            }
+            if reply_markup:
+                kwargs["reply_markup"] = reply_markup
+            await bot.send_video(**kwargs)
         logger.info("  Delivered: %s", clip_path.name)
     except Exception as exc:
         logger.warning("Failed to deliver %s: %s", clip_path.name, exc)
