@@ -425,7 +425,10 @@ async def run_pipeline(
             active_run_status[chat_id]["step"] = "Delivering Clips to Telegram..."
         await deliver_clips(final_clips, bot, chat_id, moments=moments, clip_captions=clip_captions)
 
-        if clip_captions:
+        op_admin_id = os.environ.get("TELEGRAM_OPERATOR_CHAT_ID", "").strip()
+        is_admin_run = bool(op_admin_id and str(chat_id).strip() == op_admin_id)
+
+        if clip_captions and not is_admin_run:
             title_blocks = []
             for idx, cap in enumerate(clip_captions, start=1):
                 clean_cap = html.escape(cap.strip())

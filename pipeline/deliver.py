@@ -175,8 +175,8 @@ async def deliver_zip_archive(
     clean_name = re.sub(r"[^\w]", "_", streamer_name).strip("_")
     base_name = clean_name if clean_name else "Streamer"
 
-    # Always deliver a lightweight Text Captions bundle (.txt document)
-    if clip_captions:
+    # Always deliver a lightweight Text Captions bundle (.txt document) for non-admin users
+    if clip_captions and not _is_admin_chat(chat_id):
         try:
             txt_path = tmp_dir / f"{base_name}_Titles_And_Hashtags.txt"
             captions_text = "\n\n".join(

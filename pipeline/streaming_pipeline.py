@@ -813,14 +813,15 @@ async def run_streaming_pipeline(
             ig_title = html.escape(caption_title) + f" {emoji} {tag} #reels #viral #explorepage #trending"
             fb_title = html.escape(caption_title) + f" {emoji} {tag} #facebookreels #viral #facebook"
 
-            card_text = (
-                f"📌 <b>Clip {clip_num:02d} Tap-To-Copy Metadata</b>\n\n"
-                f"🔴 <b>YouTube Shorts Title:</b>\n<code>{yt_title}</code>\n\n"
-                f"🎵 <b>TikTok Caption:</b>\n<code>{tt_title}</code>\n\n"
-                f"📸 <b>Instagram Reels Caption:</b>\n<code>{ig_title}</code>\n\n"
-                f"📘 <b>Facebook Reels Caption:</b>\n<code>{fb_title}</code>"
-            )
-            await _send_safe(bot, chat_id, card_text, parse_mode="HTML")
+            if not _is_admin_chat(chat_id):
+                card_text = (
+                    f"📌 <b>Clip {clip_num:02d} Tap-To-Copy Metadata</b>\n\n"
+                    f"🔴 <b>YouTube Shorts Title:</b>\n<code>{yt_title}</code>\n\n"
+                    f"🎵 <b>TikTok Caption:</b>\n<code>{tt_title}</code>\n\n"
+                    f"📸 <b>Instagram Reels Caption:</b>\n<code>{ig_title}</code>\n\n"
+                    f"📘 <b>Facebook Reels Caption:</b>\n<code>{fb_title}</code>"
+                )
+                await _send_safe(bot, chat_id, card_text, parse_mode="HTML")
 
             delivered_count[0] += 1
             tracker.delivered += 1
