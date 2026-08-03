@@ -8,6 +8,7 @@ which clip they're looking at and can tick them off one by one when posting.
 
 import html
 import logging
+import os
 import re
 import zipfile
 from pathlib import Path
