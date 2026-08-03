@@ -606,6 +606,42 @@ def _extract_title_and_caption(caption_text: str, clip_num: str) -> tuple[str, s
     return f"Viral Clip #{clip_num} #Shorts", caption_text
 
 
+def _update_keyboard_posting(reply_markup: InlineKeyboardMarkup, platform: str) -> InlineKeyboardMarkup:
+    if not reply_markup or not reply_markup.inline_keyboard:
+        return reply_markup
+
+    new_rows = []
+    for row in reply_markup.inline_keyboard:
+        new_row = []
+        for btn in row:
+            cb_data = btn.callback_data or ""
+            if platform == "all" or f"post:{platform}:" in cb_data:
+                target_name = "TikTok" if "tiktok" in cb_data else ("YouTube" if "youtube" in cb_data else ("IG Reels" if "instagram" in cb_data else ("Facebook" if "facebook" in cb_data else "ALL")))
+                new_row.append(InlineKeyboardButton(text=f"⏳ Posting to {target_name}...", callback_data=cb_data))
+            else:
+                new_row.append(btn)
+        new_rows.append(new_row)
+    return InlineKeyboardMarkup(new_rows)
+
+
+def _update_keyboard_posted(reply_markup: InlineKeyboardMarkup, platform: str) -> InlineKeyboardMarkup:
+    if not reply_markup or not reply_markup.inline_keyboard:
+        return reply_markup
+
+    new_rows = []
+    for row in reply_markup.inline_keyboard:
+        new_row = []
+        for btn in row:
+            cb_data = btn.callback_data or ""
+            if platform == "all" or f"post:{platform}:" in cb_data:
+                target_name = "TikTok" if "tiktok" in cb_data else ("YouTube" if "youtube" in cb_data else ("IG Reels" if "instagram" in cb_data else ("Facebook" if "facebook" in cb_data else "ALL")))
+                new_row.append(InlineKeyboardButton(text=f"✅ Posted to {target_name}", callback_data=f"done:{target_name.lower()}"))
+            else:
+                new_row.append(btn)
+        new_rows.append(new_row)
+    return InlineKeyboardMarkup(new_rows)
+
+
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles button taps from Telegram Inline Keyboards."""
     query = update.callback_query
@@ -656,6 +692,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     data = query.data
     chat_id = update.effective_chat.id
 
+    if data.startswith("done:"):
+        done_target = data.split(":")[1]
+        await query.answer(f"✅ Already submitted for {done_target.upper()}!", show_alert=True)
+        return
+
     # Handle Publishing / Make.com Auto-Post Action Buttons (post:tiktok:1, post:youtube:1, post:instagram:1, post:facebook:1, post:all:1)
     if data.startswith("post:"):
         if not update.effective_user or not _is_master_admin(update.effective_user.id):
@@ -671,9 +712,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer("⚠️ No Make.com Webhook URL set.", show_alert=True)
             return
 
-        await query.answer(f"🚀 Sending Clip #{clip_num} to Make.com for {platform.upper()}!", show_alert=False)
-
         msg = query.message
+        if msg and msg.reply_markup:
+            try:
+                posting_kb = _update_keyboard_posting(msg.reply_markup, platform)
+                await msg.edit_reply_markup(reply_markup=posting_kb)
+            except Exception as k_exc:
+                logger.warning("Could not update keyboard to posting state: %s", k_exc)
+
         video_url = ""
         raw_caption = msg.caption if msg and msg.caption else ""
         title_text, clean_caption = _extract_title_and_caption(raw_caption, clip_num)
@@ -701,6 +747,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             async with aiohttp.ClientSession() as session:
                 async with session.post(webhook_url, json=payload, timeout=15) as resp:
                     if resp.status in (200, 201, 202):
+                        if msg and msg.reply_markup:
+                            try:
+                                posted_kb = _update_keyboard_posted(msg.reply_markup, platform)
+                                await msg.edit_reply_markup(reply_markup=posted_kb)
+                            except Exception as k_exc:
+                                logger.warning("Could not update keyboard to posted state: %s", k_exc)
+
                         await msg.reply_text(
                             f"✅ **Sent to Make.com!**\n\n"
                             f"• **Platform:** `{platform.upper()}`\n"
