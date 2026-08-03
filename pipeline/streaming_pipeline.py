@@ -59,6 +59,13 @@ def _get_audio_sem():
     return _AUDIO_DOWNLOAD_SEM
 
 
+def _is_admin_chat(chat_id: int | str) -> bool:
+    op_id = os.environ.get("TELEGRAM_OPERATOR_CHAT_ID", "").strip()
+    if not op_id or op_id == "0":
+        return True
+    return str(chat_id).strip() == op_id
+
+
 async def _send_safe(bot, chat_id, text: str, parse_mode: str = "") -> None:
     try:
         kwargs = {"chat_id": chat_id, "text": text}
@@ -782,18 +789,36 @@ async def run_streaming_pipeline(
                 f"🎬 <b>Clip {clip_num:02d}</b> • {clean_streamer} [{mins}m{secs:02d}s]\n"
                 f"<i>{html.escape(caption_title)} {emoji}</i>"
             )
-            await _send_clip(bot, chat_id, final_path, video_caption)
+            if _is_admin_chat(chat_id):
+                action_keyboard = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("🚀 Post to TikTok", callback_data=f"post:tiktok:{clip_num}"),
+                        InlineKeyboardButton("🔴 Post to YouTube", callback_data=f"post:youtube:{clip_num}"),
+                    ],
+                    [
+                        InlineKeyboardButton("📸 Post to IG Reels", callback_data=f"post:instagram:{clip_num}"),
+                        InlineKeyboardButton("📘 Post to Facebook", callback_data=f"post:facebook:{clip_num}"),
+                    ],
+                    [
+                        InlineKeyboardButton("🌐 Post to ALL", callback_data=f"post:all:{clip_num}"),
+                    ],
+                ])
+            else:
+                action_keyboard = None
+            await _send_clip(bot, chat_id, final_path, video_caption, reply_markup=action_keyboard)
 
             raw_yt = getattr(m, "title", caption_title)
             yt_title = html.escape(mask_profanity(raw_yt)) + f" {emoji} {tag} #Shorts #Viral"
             tt_title = html.escape(caption_title) + f" {emoji} {tag} #viral #fyp #streamer #highlights"
             ig_title = html.escape(caption_title) + f" {emoji} {tag} #reels #viral #explorepage #trending"
+            fb_title = html.escape(caption_title) + f" {emoji} {tag} #facebookreels #viral #facebook"
 
             card_text = (
                 f"📌 <b>Clip {clip_num:02d} Tap-To-Copy Metadata</b>\n\n"
                 f"🔴 <b>YouTube Shorts Title:</b>\n<code>{yt_title}</code>\n\n"
                 f"🎵 <b>TikTok Caption:</b>\n<code>{tt_title}</code>\n\n"
-                f"📸 <b>Instagram Reels Caption:</b>\n<code>{ig_title}</code>"
+                f"📸 <b>Instagram Reels Caption:</b>\n<code>{ig_title}</code>\n\n"
+                f"📘 <b>Facebook Reels Caption:</b>\n<code>{fb_title}</code>"
             )
             await _send_safe(bot, chat_id, card_text, parse_mode="HTML")
 

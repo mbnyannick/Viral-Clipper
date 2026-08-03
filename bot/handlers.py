@@ -586,6 +586,26 @@ def _get_or_recover_session(chat_id: int, update: Update, query=None) -> dict | 
     return None
 
 
+def _extract_title_and_caption(caption_text: str, clip_num: str) -> tuple[str, str]:
+    if not caption_text:
+        return f"Viral Clip #{clip_num} #Shorts", f"Viral Clip #{clip_num}\n#Shorts #Viral"
+
+    lines = [line.strip() for line in caption_text.splitlines() if line.strip()]
+    content_lines = [
+        line for line in lines
+        if not (line.startswith("📹") or line.startswith("💡") or line.startswith("🎬"))
+    ]
+
+    if content_lines:
+        title = content_lines[0]
+        if "#Shorts" not in title and "#shorts" not in title:
+            title = f"{title} #Shorts"
+        description = "\n\n".join(content_lines)
+        return title, description
+
+    return f"Viral Clip #{clip_num} #Shorts", caption_text
+
+
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles button taps from Telegram Inline Keyboards."""
     query = update.callback_query
@@ -636,8 +656,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     data = query.data
     chat_id = update.effective_chat.id
 
-    # Handle Publishing / Make.com Auto-Post Action Buttons (post:tiktok:1, post:youtube:1, post:instagram:1, post:all:1)
+    # Handle Publishing / Make.com Auto-Post Action Buttons (post:tiktok:1, post:youtube:1, post:instagram:1, post:facebook:1, post:all:1)
     if data.startswith("post:"):
+        if not update.effective_user or not _is_master_admin(update.effective_user.id):
+            await query.answer("🔒 Auto-Posting is restricted to the Admin's connected social media accounts.", show_alert=True)
+            return
+
         parts = data.split(":")
         platform = parts[1]
         clip_num = parts[2] if len(parts) > 2 else "1"
@@ -651,8 +675,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         msg = query.message
         video_url = ""
-        caption_text = msg.caption if msg and msg.caption else f"Clip {clip_num}"
-        title_text = caption_text.split("\n")[0] if caption_text else f"Clip {clip_num}"
+        raw_caption = msg.caption if msg and msg.caption else ""
+        title_text, clean_caption = _extract_title_and_caption(raw_caption, clip_num)
 
         if msg and msg.video:
             try:
@@ -665,9 +689,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "platform": platform,
             "clip_id": f"clip_{int(clip_num):03d}",
             "title": title_text,
-            "caption": caption_text,
+            "caption": clean_caption,
             "video_url": video_url,
-            "hashtags": "#Shorts #Viral #TikTok #Reels",
+            "hashtags": "#Shorts #Viral #TikTok #Reels #Facebook",
             "chat_id": chat_id,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }

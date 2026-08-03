@@ -19,6 +19,13 @@ from .errors import PipelineError
 logger = logging.getLogger(__name__)
 
 
+def _is_admin_chat(chat_id: int | str) -> bool:
+    op_id = os.environ.get("TELEGRAM_OPERATOR_CHAT_ID", "").strip()
+    if not op_id or op_id == "0":
+        return True
+    return str(chat_id).strip() == op_id
+
+
 async def deliver_clips(
     final_clips: list[Path],
     bot: Bot,
@@ -84,16 +91,22 @@ async def deliver_clips(
             else:
                 caption = f"📹 <b>Clip {i:02d}/{total:02d}</b>"
 
-        action_keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("🚀 Post to TikTok", callback_data=f"post:tiktok:{i}"),
-                InlineKeyboardButton("🔴 Post to YouTube", callback_data=f"post:youtube:{i}"),
-            ],
-            [
-                InlineKeyboardButton("📸 Post to IG Reels", callback_data=f"post:instagram:{i}"),
-                InlineKeyboardButton("🌐 Post to ALL", callback_data=f"post:all:{i}"),
-            ]
-        ])
+        if _is_admin_chat(chat_id):
+            action_keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🚀 Post to TikTok", callback_data=f"post:tiktok:{i}"),
+                    InlineKeyboardButton("🔴 Post to YouTube", callback_data=f"post:youtube:{i}"),
+                ],
+                [
+                    InlineKeyboardButton("📸 Post to IG Reels", callback_data=f"post:instagram:{i}"),
+                    InlineKeyboardButton("📘 Post to Facebook", callback_data=f"post:facebook:{i}"),
+                ],
+                [
+                    InlineKeyboardButton("🌐 Post to ALL", callback_data=f"post:all:{i}"),
+                ]
+            ])
+        else:
+            action_keyboard = None
 
         target_path = path
         if path.exists() and path.stat().st_size > 49 * 1024 * 1024:
