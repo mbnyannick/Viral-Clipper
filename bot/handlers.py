@@ -731,6 +731,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             except Exception as f_exc:
                 logger.warning("Could not get Telegram video download link: %s", f_exc)
 
+        logger.info("Preparing Make.com webhook payload for platform '%s', clip_num %s, video_url='%s'", platform, clip_num, video_url)
         payload = {
             "platform": platform,
             "clip_id": f"clip_{int(clip_num):03d}",
@@ -741,6 +742,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "chat_id": chat_id,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
+        logger.info("Sending Make.com webhook payload: %s", payload)
 
         def _post_json_sync(url: str, post_data: dict) -> tuple[int, str]:
             import json
