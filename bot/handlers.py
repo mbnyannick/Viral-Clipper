@@ -742,27 +742,38 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
-        import aiohttp
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(webhook_url, json=payload, timeout=15) as resp:
-                    if resp.status in (200, 201, 202):
-                        if msg and msg.reply_markup:
-                            try:
-                                posted_kb = _update_keyboard_posted(msg.reply_markup, platform)
-                                await msg.edit_reply_markup(reply_markup=posted_kb)
-                            except Exception as k_exc:
-                                logger.warning("Could not update keyboard to posted state: %s", k_exc)
+        def _post_json_sync(url: str, post_data: dict) -> tuple[int, str]:
+            import json
+            import urllib.request
+            data_bytes = json.dumps(post_data).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=data_bytes,
+                headers={"Content-Type": "application/json", "User-Agent": "ViralBot/1.0"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=15) as response:
+                return response.status, response.read().decode("utf-8", errors="replace")
 
-                        await msg.reply_text(
-                            f"✅ **Sent to Make.com!**\n\n"
-                            f"• **Platform:** `{platform.upper()}`\n"
-                            f"• **Clip:** #{clip_num}\n"
-                            f"• **Status:** Webhook Triggered Successfully",
-                            parse_mode="Markdown",
-                        )
-                    else:
-                        await msg.reply_text(f"⚠️ Make.com returned HTTP status {resp.status}.")
+        try:
+            status_code, body_text = await asyncio.to_thread(_post_json_sync, webhook_url, payload)
+            if status_code in (200, 201, 202):
+                if msg and msg.reply_markup:
+                    try:
+                        posted_kb = _update_keyboard_posted(msg.reply_markup, platform)
+                        await msg.edit_reply_markup(reply_markup=posted_kb)
+                    except Exception as k_exc:
+                        logger.warning("Could not update keyboard to posted state: %s", k_exc)
+
+                await msg.reply_text(
+                    f"✅ **Sent to Make.com!**\n\n"
+                    f"• **Platform:** `{platform.upper()}`\n"
+                    f"• **Clip:** #{clip_num}\n"
+                    f"• **Status:** Webhook Triggered Successfully",
+                    parse_mode="Markdown",
+                )
+            else:
+                await msg.reply_text(f"⚠️ Make.com returned HTTP status {status_code}.")
         except Exception as http_exc:
             logger.error("Make.com webhook dispatch error: %s", http_exc)
             await msg.reply_text(f"❌ Failed to reach Make.com webhook: {http_exc}")
