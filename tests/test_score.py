@@ -129,3 +129,17 @@ def test_format_transcript_structure():
 async def test_moment_duration_property():
     m = Moment(index=0, start=10.0, end=45.5, caption_lines=["TEST"], emoji="🔥", score=90, reasoning="Test", title="Test", bgm_track="none", sfx_events=[])
     assert m.duration == pytest.approx(35.5)
+
+
+async def test_score_moments_truncates_to_top_n():
+    """Verify that score_moments returns at most top_n moments even if LLM returns more."""
+    five_moments_json = json.dumps([
+        {"start": float(i * 10), "end": float(i * 10 + 20), "caption_lines": ["LINE1", "LINE2"], "emoji": "🔥"}
+        for i in range(5)
+    ])
+    patcher, _ = _patch_client([_make_response(five_moments_json)])
+    try:
+        moments = await score_moments(SAMPLE_SEGMENTS, api_key="test", top_n=3)
+        assert len(moments) == 3
+    finally:
+        patcher.stop()

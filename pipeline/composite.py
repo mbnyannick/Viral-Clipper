@@ -12,20 +12,22 @@ Supports two layout modes:
 
 import asyncio
 import logging
+import subprocess
 import typing
 from pathlib import Path
+
 
 from .crop import detect_crop_offset
 from .errors import PipelineError
 from .score import Moment
-from .subtitle import build_word_subtitle_filter
+from .subtitle import build_word_subtitle_filter, build_aura_keyword_filter
 
 logger = logging.getLogger(__name__)
 
-CANVAS_W = 720
-CANVAS_H = 1280
-GAP_PX = 24
-CAPTION_OVERLAP = 40   # px the caption overlaps INTO the top of the video frame
+CANVAS_W = 2160
+CANVAS_H = 3840
+GAP_PX = 72
+CAPTION_OVERLAP = 120   # px the caption overlaps INTO the top of the video frame @ 4K
 
 _COMPOSITE_CONCURRENCY = 2
 
@@ -126,6 +128,13 @@ def prepare_watermark(
         return output_path, 1, 1
 
 
+def _get_1_1_crop_filter() -> str:
+    """Return FFmpeg vf snippet that center-crops video footage to 1:1 square ratio.
+    Formula: crop=ih:ih:(iw-ih)/2:0 (crop square ih x ih from center).
+    """
+    return "crop=ih:ih:(iw-ih)/2:0"
+
+
 async def _composite_one(
     clip_path: Path,
     caption_path: Path,
@@ -142,107 +151,222 @@ async def _composite_one(
     norm_wm_path = output_dir / f"wm_norm_{moment.index:02d}.png"
     _, wm_w, wm_h = prepare_watermark(watermark_path, norm_wm_path)
 
-    # Position watermark logo centered horizontally, placed just below the video frame right above the username area
-    use_4_3 = layout_mode not in ("face_crop",)
-    video_top_y, scaled_h = await _probe_video_position(clip_path, apply_4_3_crop=use_4_3)
+    is_square = ("1_1" in layout_mode) or ("square" in layout_mode)
+    if is_square:
+        scaled_h = CANVAS_W  # 720px height for 1:1
+        video_top_y = (CANVAS_H - CANVAS_W) // 2  # 280px
+        crop_filter_str = _get_1_1_crop_filter()
+    elif layout_mode != "face_crop":
+        scaled_h = CANVAS_W * 3 // 4  # 540px height for 4:3
+        video_top_y = (CANVAS_H - scaled_h) // 2  # 370px
+        crop_filter_str = _get_4_3_crop_filter()
+    else:
+        video_top_y = 0
+        scaled_h = CANVAS_H
+        crop_filter_str = ""
+
     video_bottom_y = video_top_y + scaled_h
 
     wm_x = max(10, min((CANVAS_W - wm_w) // 2, CANVAS_W - wm_w - 10))
     if layout_mode == "face_crop":
         wm_y = CANVAS_H - wm_h - 180
     else:
-        wm_y = min(video_bottom_y + 10, CANVAS_H - wm_h - 120)
-    wm_y = max(10, min(wm_y, CANVAS_H - wm_h - 10))
+        wm_y = min(video_bottom_y + 12, CANVAS_H - wm_h - 10)
+    # Clean, natural studio profile (matches the BEFORE look — no harsh contrast, over-sharpening, or artificial saturation)
+    COLOR_ENHANCE = "eq=contrast=1.00:brightness=0.00:saturation=1.00"
 
+    # ── 1. AI Voiceover generation ───────────────────────────────────────────
+
+    vo_path = output_dir / f"vo_{moment.index:02d}.mp3"
+    vo_file = None
+    vo_dur = 0.0
+    vo_script = getattr(moment, "voiceover", None)
+    if not vo_script or not str(vo_script).strip():
+        vo_script = f"Wait until you see how this moment unfolded live!"
+    try:
+        from .voiceover import generate_voiceover
+        vo_file = await generate_voiceover(str(vo_script), vo_path)
+        if vo_file and vo_file.exists():
+            res = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(vo_file)],
+                capture_output=True, text=True, check=True, timeout=5
+            )
+            vo_dur = float(res.stdout.strip())
+            logger.info("  Voiceover hook duration: %.2fs (teaser concat + 100%% lip sync offset)", vo_dur)
+    except Exception as vo_exc:
+        logger.warning("Voiceover generation exception: %s", vo_exc)
+
+    # ── 2. Mood-matched BGM selection ─────────────────────────────────────────
+    bgm_dir = Path("assets/bgm")
+    mood = (getattr(moment, "bgm_track", "hype") or "hype").lower().strip()
+    if mood in ("suspense", "dark"):
+        mood = "drama"
+    elif mood in ("funny", "meme"):
+        mood = "comedy"
+    elif mood in ("lofi", "sad", "relaxed"):
+        mood = "chill"
+
+    mood_dir = bgm_dir / mood
+    bgm_tracks = []
+    if mood_dir.exists():
+        bgm_tracks = list(mood_dir.glob("*.mp3")) + list(mood_dir.glob("*.wav"))
+
+    if not bgm_tracks and bgm_dir.exists():
+        bgm_tracks = list(bgm_dir.rglob("*.mp3")) + list(bgm_dir.rglob("*.wav"))
+
+    bgm_file = bgm_tracks[moment.index % len(bgm_tracks)] if bgm_tracks else None
+    if not bgm_file:
+        try:
+            from .pixabay_assets import get_pixabay_asset
+            bgm_file = await get_pixabay_asset(category="bgm", query=mood)
+        except Exception as px_exc:
+            logger.warning("Pixabay BGM fetch fallback: %s", px_exc)
+
+    if bgm_file:
+        logger.info("  Using BGM track (%s mood): %s", mood, bgm_file.name)
+
+    # ── 3. Build Video Filtergraph per Layout Mode ─────────────────────────────
     if layout_mode == "face_crop":
-        crop_filter = await detect_crop_offset(clip_path)
+        crop_filter = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale={CANVAS_W}:{CANVAS_H}:flags=lanczos"
         logger.info(
-            "  Compositing clip %02d (face_crop clean full screen, wm_y=%d, speed=1.10x, sub=%s)",
+            "  Compositing clip %02d (face_crop clean full screen, wm_y=%d, sub=%s)",
             moment.index, wm_y, enable_subtitles,
         )
-        # Build subtitle filter for face_crop layout if enabled
         sub_filter = ""
         punch_in_expr = None
         if enable_subtitles and segments:
-            sf, p_expr = build_word_subtitle_filter(segments, moment.start, moment.end, canvas_w=CANVAS_W, wm_y=wm_y, canvas_h=CANVAS_H)
+            sf, p_expr = build_word_subtitle_filter(segments, moment.start, moment.end, canvas_w=CANVAS_W, wm_y=wm_y, canvas_h=CANVAS_H, time_offset=vo_dur)
             if sf:
-                sub_filter = f",subtitles='{sf}':fontsdir=assets/fonts"
+                sub_filter = f"subtitles=filename='{sf}':fontsdir='assets/fonts'"
             punch_in_expr = p_expr
-            
-        if punch_in_expr:
-            # 1.2x Zoom Punch-In Crop during high-emotion keywords!
-            zoom_crop = crop_filter.replace("crop=ih*9/16:ih:", "crop=ih*9/16*0.833:ih*0.833:")
-            zoom_crop = zoom_crop.replace(":0,scale", "+ih*9/16*0.0835:0,scale")
-            vf = (
-                f"[0:v]{crop_filter},setpts=PTS/1.10[base];"
-                f"[0:v]{zoom_crop},setpts=PTS/1.10[zoom];"
-                f"[base][zoom]overlay=x=0:y=0:enable='{punch_in_expr}'[cropped];"
-                # White card overlay visible for first 5 seconds
-                f"[cropped][1:v]overlay=0:0:enable='between(t,0,5)'[with_cap];"
-                f"[with_cap][2:v]overlay={wm_x}:{wm_y}[out2];"
-                f"[out2]null{sub_filter}[out]"
+
+        # Build aura keyword overlay (*WORD* flash at peak moment)
+        aura_word = getattr(moment, "aura_word", "")
+        clip_dur = moment.end - moment.start + vo_dur
+        aura_filter = build_aura_keyword_filter(aura_word, clip_dur, canvas_w=CANVAS_W, canvas_h=CANVAS_H) if aura_word else None
+
+        if sub_filter and aura_filter:
+            sub_stage = f"[out2]{sub_filter}[sub_out];[sub_out]{aura_filter}[out]"
+        elif sub_filter:
+            sub_stage = f"[out2]{sub_filter}[out]"
+        elif aura_filter:
+            sub_stage = f"[out2]{aura_filter}[out]"
+        else:
+            sub_stage = "[out2]null[out]"
+
+        if vo_dur > 0:
+            concat_v = (
+                f"[0:v]{crop_filter},{COLOR_ENHANCE},split=2[vt_in][vm_in];"
+                f"[vt_in]trim=end={vo_dur:.2f},setpts=PTS-STARTPTS[v_teaser];"
+                f"[vm_in]setpts=PTS-STARTPTS[v_main];"
+                f"[v_teaser][v_main]concat=n=2:v=1:a=0[vbase];"
             )
         else:
-            vf = (
-                f"[0:v]{crop_filter},setpts=PTS/1.10[cropped];"
-                # White card overlay visible for first 5 seconds
-                f"[cropped][1:v]overlay=0:0:enable='between(t,0,5)'[with_cap];"
-                f"[with_cap][2:v]overlay={wm_x}:{wm_y}[out2];"
-                f"[out2]null{sub_filter}[out]"
-            )
-    elif layout_mode == "blurred_frame":
-        crop_4_3 = _get_4_3_crop_filter()
+            concat_v = f"[0:v]{crop_filter},{COLOR_ENHANCE},setpts=PTS-STARTPTS[vbase];"
+
+        vf = (
+            f"{concat_v}"
+            f"[vbase][1:v]overlay=0:0[v1];"
+            f"[v1][2:v]overlay={wm_x}:{wm_y}[out2];"
+            f"{sub_stage}"
+        )
+    elif "blur" in layout_mode or layout_mode == "blurred_frame":
         logger.info(
-            "  Compositing clip %02d (blurred_frame 720x1280, 4:3 crop, wm_y=%d, speed=1.10x)",
-            moment.index, wm_y,
+            "  Compositing clip %02d (%s 720x1280, crop=%s, wm_y=%d)",
+            moment.index, layout_mode, "1:1" if is_square else "4:3", wm_y,
         )
         sub_filter = ""
         if enable_subtitles and segments:
-            sf, _ = build_word_subtitle_filter(segments, moment.start, moment.end, canvas_w=CANVAS_W, wm_y=wm_y, canvas_h=CANVAS_H)
+            sf, _ = build_word_subtitle_filter(segments, moment.start, moment.end, canvas_w=CANVAS_W, wm_y=wm_y, canvas_h=CANVAS_H, time_offset=vo_dur)
             if sf:
-                sub_filter = f",subtitles='{sf}':fontsdir=assets/fonts"
+                sub_filter = f"subtitles=filename='{sf}':fontsdir='assets/fonts'"
+
+        # Build aura keyword overlay (*WORD* flash at peak moment)
+        aura_word = getattr(moment, "aura_word", "")
+        clip_dur = moment.end - moment.start + vo_dur
+        aura_filter = build_aura_keyword_filter(aura_word, clip_dur, canvas_w=CANVAS_W, canvas_h=CANVAS_H) if aura_word else None
+
+        if sub_filter and aura_filter:
+            sub_stage = f"[out2]{sub_filter}[sub_out];[sub_out]{aura_filter}[out]"
+        elif sub_filter:
+            sub_stage = f"[out2]{sub_filter}[out]"
+        elif aura_filter:
+            sub_stage = f"[out2]{aura_filter}[out]"
+        else:
+            sub_stage = "[out2]null[out]"
+
+        # Silky smooth HD background blur + Lanczos sharp main video scaling
+        if vo_dur > 0:
+            concat_v = (
+                f"[0:v]scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,crop={CANVAS_W}:{CANVAS_H},boxblur=25:3[bg];"
+                f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=lanczos,{COLOR_ENHANCE}[fg];"
+                f"[bg][fg]overlay=0:{video_top_y},split=2[vt_in][vm_in];"
+                f"[vt_in]trim=end={vo_dur:.2f},setpts=PTS-STARTPTS[v_teaser];"
+                f"[vm_in]setpts=PTS-STARTPTS[v_main];"
+                f"[v_teaser][v_main]concat=n=2:v=1:a=0[vbase];"
+            )
+        else:
+            concat_v = (
+                f"[0:v]scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,crop={CANVAS_W}:{CANVAS_H},boxblur=25:3[bg];"
+                f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=lanczos,{COLOR_ENHANCE}[fg];"
+                f"[bg][fg]overlay=0:{video_top_y},setpts=PTS-STARTPTS[vbase];"
+            )
+
         vf = (
-            # Blurred full-canvas background from original clip
-            f"[0:v]scale=108:192:force_original_aspect_ratio=increase,crop=108:192,boxblur=4:1,scale={CANVAS_W}:{CANVAS_H}[bg];"
-            # 4:3 center-crop the sharp foreground, scale to canvas width
-            f"[0:v]{crop_4_3},scale={CANVAS_W}:{CANVAS_W * 3 // 4}[fg];"
-            f"[bg][fg]overlay=0:{video_top_y},setpts=PTS/1.10[vbase];"
-            # Full-canvas white card PNG visible for first 5 seconds only
-            f"[vbase][1:v]overlay=0:0:enable='between(t,0,5)'[v1];"
+            f"{concat_v}"
+            f"[vbase][1:v]overlay=0:0[v1];"
             f"[v1][2:v]overlay={wm_x}:{wm_y}[out2];"
-            f"[out2]null{sub_filter}[out]"
+            f"{sub_stage}"
         )
     else:
-        # Custom Canvas Background Color (black, red, blue, purple, dark_red)
         bg_color = "black"
-        if "red" in layout_mode:
-            bg_color = "#800000"  # Deep Crimson Red
+        if "pink" in layout_mode:
+            bg_color = "#ff69b4"
+        elif "red" in layout_mode:
+            bg_color = "#800000"
         elif "blue" in layout_mode:
-            bg_color = "#001f3f"  # Midnight Navy Blue
+            bg_color = "#001f3f"
         elif "purple" in layout_mode:
-            bg_color = "#2d004d"  # Dark Velvet Purple
+            bg_color = "#2d004d"
         elif "grey" in layout_mode or "gray" in layout_mode:
-            bg_color = "#1a1a1a"  # Dark Charcoal Grey
+            bg_color = "#1a1a1a"
 
-        # FFmpeg pad filter needs 0x-prefixed hex or named colors
         bg_color_pad = bg_color.replace("#", "0x")
-        logger.info(
-            "  Compositing clip %02d (%s 720x1280, color=%s, 4:3 crop, wm_y=%d, speed=1.10x, sub=%s)",
-            moment.index, layout_mode, bg_color, wm_y, enable_subtitles,
-        )
         sub_filter = ""
         if enable_subtitles and segments:
-            sf, _ = build_word_subtitle_filter(segments, moment.start, moment.end, canvas_w=CANVAS_W, wm_y=wm_y, canvas_h=CANVAS_H)
+            sf, _ = build_word_subtitle_filter(segments, moment.start, moment.end, canvas_w=CANVAS_W, wm_y=wm_y, canvas_h=CANVAS_H, time_offset=vo_dur)
             if sf:
-                sub_filter = f",subtitles='{sf}':fontsdir=assets/fonts"
-        crop_4_3 = _get_4_3_crop_filter()
+                sub_filter = f"subtitles=filename='{sf}':fontsdir='assets/fonts'"
+
+        # Build aura keyword overlay (*WORD* flash at peak moment)
+        aura_word = getattr(moment, "aura_word", "")
+        clip_dur = moment.end - moment.start + vo_dur
+        aura_filter = build_aura_keyword_filter(aura_word, clip_dur, canvas_w=CANVAS_W, canvas_h=CANVAS_H) if aura_word else None
+
+        if sub_filter and aura_filter:
+            sub_stage = f"[out2]{sub_filter}[sub_out];[sub_out]{aura_filter}[out]"
+        elif sub_filter:
+            sub_stage = f"[out2]{sub_filter}[out]"
+        elif aura_filter:
+            sub_stage = f"[out2]{aura_filter}[out]"
+        else:
+            sub_stage = "[out2]null[out]"
+
+        if vo_dur > 0:
+            concat_v = (
+                f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h},{COLOR_ENHANCE},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},split=2[vt_in][vm_in];"
+                f"[vt_in]trim=end={vo_dur:.2f},setpts=PTS-STARTPTS[v_teaser];"
+                f"[vm_in]setpts=PTS-STARTPTS[v_main];"
+                f"[v_teaser][v_main]concat=n=2:v=1:a=0[vbase];"
+            )
+        else:
+            concat_v = f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h},{COLOR_ENHANCE},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},setpts=PTS-STARTPTS[vbase];"
+
         vf = (
-            # 4:3 crop, scale to canvas width, pad to full canvas with solid bg color
-            f"[0:v]{crop_4_3},scale={CANVAS_W}:{CANVAS_W * 3 // 4},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},setpts=PTS/1.10[vbase];"
-            # Full-canvas white card PNG visible for first 5 seconds only
-            f"[vbase][1:v]overlay=0:0:enable='between(t,0,5)'[v1];"
+            f"{concat_v}"
+            f"[vbase][1:v]overlay=0:0[v1];"
             f"[v1][2:v]overlay={wm_x}:{wm_y}[out2];"
-            f"[out2]null{sub_filter}[out]"
+            f"{sub_stage}"
         )
 
     inputs = [
@@ -251,7 +375,62 @@ async def _composite_one(
         "-i", str(norm_wm_path),
     ]
 
-    filter_complex = f"{vf}; [0:a]atempo=1.10,volume=1.5[outa]"
+    # ── 4. Audio Filtergraph Alignment ────────────────────────────────────────
+    a_idx = 3
+    vo_input_idx = None
+    bgm_input_idx = None
+    sfx_input_idx = None
+
+    if vo_file:
+        inputs.extend(["-i", str(vo_file)])
+        vo_input_idx = a_idx
+        a_idx += 1
+
+    if bgm_file:
+        inputs.extend(["-i", str(bgm_file)])
+        bgm_input_idx = a_idx
+        a_idx += 1
+
+    sfx_file = Path("assets/sfx/whoosh.wav")
+    if sfx_file.exists():
+        inputs.extend(["-i", str(sfx_file)])
+        sfx_input_idx = a_idx
+        a_idx += 1
+
+
+    # Mute/delay original clip audio during Voiceover lead-in
+    if vo_dur > 0:
+        delay_ms = int(vo_dur * 1000)
+        audio_mix_filters = [f"[0:a]volume=1.3,adelay=delays={delay_ms}|{delay_ms}[orig_a]"]
+    else:
+        audio_mix_filters = ["[0:a]volume=1.3[orig_a]"]
+
+    mix_inputs = ["[orig_a]"]
+
+    if vo_input_idx is not None:
+        audio_mix_filters.append(f"[{vo_input_idx}:a]volume=8.0[vo_a]")  # Super loud, booming crystal clear voiceover
+        mix_inputs.append("[vo_a]")
+
+    if bgm_input_idx is not None:
+        audio_mix_filters.append(f"[{bgm_input_idx}:a]volume=0.20,aloop=loop=-1:size=2e+09[bgm_a]")  # Subtle background beat
+        mix_inputs.append("[bgm_a]")
+
+    if sfx_input_idx is not None:
+        audio_mix_filters.append(f"[{sfx_input_idx}:a]volume=1.2[sfx_a]")
+        mix_inputs.append("[sfx_a]")
+
+    if len(mix_inputs) > 1:
+        mix_str = "".join(mix_inputs)
+        audio_mix_filters.append(f"{mix_str}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=2:normalize=0[outa]")
+    else:
+        audio_mix_filters.append("[orig_a]anull[outa]")
+
+
+
+
+
+    af_chain = ";".join(audio_mix_filters)
+    filter_complex = f"{vf};{af_chain}"
     a_map = "[outa]"
 
     cmd = [
@@ -267,6 +446,7 @@ async def _composite_one(
         str(out_path),
     ]
 
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -275,29 +455,40 @@ async def _composite_one(
         )
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300.0)
         if proc.returncode != 0:
-            logger.warning("clip_%02d compositing error: %s", moment.index, stderr.decode(errors='replace')[-300:])
+            err_str = stderr.decode(errors='replace')[-500:]
+            logger.error("clip_%02d compositing failed (exit %d): %s", moment.index, proc.returncode, err_str)
+            raise RuntimeError(f"FFmpeg compositing error: {err_str}")
     except Exception as exc:
         err_msg = repr(exc) if not str(exc) else str(exc)
-        logger.warning("Clip %02d compositing timeout/error (%s) — using fast fallback copy", moment.index, err_msg)
+        logger.warning("Clip %02d compositing error (%s) — running vertical 9:16 fallback", moment.index, err_msg)
         try:
             if 'proc' in locals() and proc:
                 proc.kill()
                 await proc.wait()
         except Exception:
             pass
+
+        # Robust vertical 9:16 fallback rendering that STILL applies 720x1280 vertical layout & captions!
         cmd_fallback = [
-            "ffmpeg", "-y", "-i", str(clip_path),
-            "-vf", "crop=ih*9/16:ih,scale=720:1280",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-c:a", "aac",
+            "ffmpeg", "-y",
+            "-i", str(clip_path),
+            "-i", str(caption_path),
+            "-filter_complex", f"[0:v]scale=108:192:force_original_aspect_ratio=increase,crop=108:192,boxblur=4:1,scale={CANVAS_W}:{CANVAS_H}[bg];[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}[fg];[bg][fg]overlay=0:{video_top_y}[vbase];[vbase][1:v]overlay=0:0[out]",
+            "-map", "[out]",
+            "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:a", "aac",
             str(out_path),
         ]
         try:
-            p2 = await asyncio.create_subprocess_exec(*cmd_fallback, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-            await asyncio.wait_for(p2.communicate(), timeout=60.0)
-        except Exception:
-            pass
+            p2 = await asyncio.create_subprocess_exec(*cmd_fallback, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+            _, err2 = await asyncio.wait_for(p2.communicate(), timeout=120.0)
+            if p2.returncode != 0:
+                logger.error("Fallback render failed: %s", err2.decode(errors='replace')[-300:])
+        except Exception as fb_exc:
+            logger.error("Fallback render exception: %s", fb_exc)
 
-    return out_path if out_path.exists() else clip_path
+    return out_path if (out_path.exists() and out_path.stat().st_size > 50000) else clip_path
 
 import sys
 
@@ -306,13 +497,16 @@ _COMPOSITE_SEMAPHORE = asyncio.Semaphore(2)
 
 def _get_v_encoder_args() -> list[str]:
     if sys.platform == "darwin":
-        return ["-c:v", "h264_videotoolbox", "-b:v", "4500k"]
+        return ["-c:v", "h264_videotoolbox", "-b:v", "25000k"]
     return [
         "-c:v", "libx264",
-        "-preset", "superfast",
-        "-crf", "20",
+        "-preset", "fast",
+        "-crf", "16",
+        "-maxrate", "25000k",
+        "-bufsize", "50000k",
         "-threads", "4",
     ]
+
 
 
 async def composite_clips(

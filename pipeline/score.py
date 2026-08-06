@@ -33,9 +33,13 @@ class Moment:
     emoji: str
     score: int = 90       # Viral potential score (0-100)
     reasoning: str = ""   # 1-sentence explanation of why it's viral
-    title: str = ""       # YouTube Shorts title (Max 38 characters)
+    title: str = ""       # YouTube Shorts title (≤50 chars, curiosity-gap style)
+    hashtags: str = ""    # 6 to 10 highly relevant topic hashtags (e.g. #Streamer #Topic #ViralClips)
+    voiceover: str = ""   # 1-sentence hook narration commentary for AI TTS
     bgm_track: str = "none" # "hype", "suspense", "funny", "sad", or "none"
-    sfx_events: list[dict] = field(default_factory=list) # list of {"type": "boom"|"whoosh"|"ding", "time_offset": float}
+    sfx_events: list[dict] = field(default_factory=list)
+    aura_word: str = ""   # Single cinematic keyword that defines this clip's energy (e.g. COOKED, AURA, IMPRESSED)
+
 
     @property
     def duration(self) -> float:
@@ -43,15 +47,6 @@ class Moment:
 
 
 def clean_streamer_name(raw_name: str) -> str:
-    """
-    Clean channel/streamer names by stripping suffixes like Live, VODs, Clips, Shorts, Official.
-    Examples:
-        'Kai Cenat Live' -> 'Kai'
-        'N3on Live' -> 'N3on'
-        'Adin Live' -> 'Adin'
-        'Speed Live' -> 'Speed'
-        'Caleb Hammer Official' -> 'Caleb Hammer'
-    """
     if not raw_name:
         return "Streamer"
 
@@ -93,25 +88,30 @@ SPEAKER & CAPTION IDENTIFICATION RULES (CRITICAL):
    - If channel is named 'Kai Cenat Live', 'Kai Clips' -> Real Name is ONLY "Kai" or "Kai Cenat".
    - If channel is named 'N3on Live', 'N3on Central' -> Real Name is ONLY "N3on".
 3. USE CLEAN SHORT NAMES: Once you deduce the true identity, use ONLY their clean short real names in text overlays, YouTube Shorts titles, and hashtags.
-4. PROFANITY MASKING (ALGORITHM SAFE): NEVER output raw un-censored swear words or explicit violence terms in caption_lines or title. Always sanitize explicit profanity using asterisks (e.g. "F**K", "K*LL", "SH*T", "B*TCH", "N***A").
-5. MANDATORY EMOJIS (2 TO 3 EMOJIS): Every single moment MUST include 2 to 3 vibrant, high-energy emoji characters together in the "emoji" field (e.g. "🔥💀", "😱🚨", "😂🤡💀", "📈🤯🔥", "🚨😱🤡"). Never leave emoji empty or single!
-6. EVEN TIMELINE DISTRIBUTION: Spread the {top_n} moments across the full timeline of the video (beginning, middle, and end).
+4. SECONDARY/GUEST SPEAKER RULE — "BRO" (MANDATORY): When referencing any person who is NOT the main streamer — whether a guest, chat user, random caller, interviewer, opponent, or anyone else — ALWAYS call them "Bro" in caption_lines and titles. Do NOT try to guess or invent their name. "Bro" is gender-neutral Gen Z language that works for both males and females. Example: "Bro CLAPPED Back Hard 😂", "Bro Said WHAT?! 😱", "Bro Can't HANDLE It 💀".
+5. PROFANITY MASKING (ALGORITHM SAFE): NEVER output raw un-censored swear words or explicit violence terms in caption_lines or title. Always sanitize explicit profanity using asterisks (e.g. "F**K", "K*LL", "SH*T", "B*TCH", "N***A").
+6. MANDATORY EMOJIS (2 TO 3 EMOJIS): Every single moment MUST include 2 to 3 vibrant, high-energy emoji characters together in the "emoji" field (e.g. "🔥💀", "😱🚨", "😂🤡💀", "📈🤯🔥", "🚨😱🤡"). Never leave emoji empty or single!
+7. EVEN TIMELINE DISTRIBUTION: Spread the {top_n} moments across the full timeline of the video (beginning, middle, and end).
+8. RELEVANT TOPIC HASHTAGS: For EVERY clip, generate 6 to 10 HIGHLY SPECIFIC, relevant hashtags based directly on the streamer's name, the video topic, guest names, and exact clip subject (e.g. "#{streamer} #TopicName #StreamerDrama #KickClips #FunnyMoments #TwitchHighlights"). NEVER return generic or irrelevant hashtags!
 
-CAPTION FORMAT (STANDING SPEC — follow exactly, every clip, no exceptions):
-7. EXACTLY 3 LINES in caption_lines — no more, no less. Never 2, never 4. Always 3.
-8. LINE 1 = HOOK (shown first, bold): Short punchy attention-grabber. Lead with the SHOCKING or FUNNY moment itself. MUST contain 1 key word in ALL CAPS. BAD: "The streamer reacts to news" GOOD: "bro said WHAT on stream"
-9. LINES 2–3 = PAYOFF: Deliver the punch in 2 short lines. Must complete the story or reaction. MUST contain 1 more ALL CAPS word somewhere in lines 2–3. e.g. "he actually said that LIVE" or "chat went ABSOLUTELY insane".
-10. TOTAL ALL CAPS: exactly 1–2 ALL CAPS words spread across all 3 lines. Not zero (no emphasis = bland), not 3+ (over-capitalizing kills impact).
-11. 3–5 words per line maximum. Count strictly.
-12. 100% UNIQUE PHRASING — no repeated words, hooks, or sentence structure across any clip in this batch.
-13. DO NOT put the emoji inside caption_lines — it belongs in the "emoji" field only.
+CAPTION FORMAT:
+9. EXACTLY 3 LINES in caption_lines — Line 1 = HOOK with 1 ALL CAPS word. Lines 2–3 = PAYOFF with 1 more ALL CAPS word. Max 5 words/line.
+10. 100% UNIQUE PHRASING — no repeated words, hooks, or sentence structure across any clip in this batch.
+11. DO NOT put the emoji inside caption_lines — it belongs in the "emoji" field only.
 
-CORRECT EXAMPLES (copy this style exactly):
-  ["bro said WHAT", "i just paraphrase", "said it on CAMERA"]
-  ["caught him SLIPPING", "no cap he froze", "chat went WILD"]
-  ["she asked HOW MUCH", "he admitted it LIVE", "the number was insane"]
-  ["EXPOSED on stream", "he couldn't even explain", "the chat lost it"]
+AURA KEYWORD RULE (CRITICAL):
+12. For EVERY clip, pick ONE single uppercase word that perfectly captures the energy and vibe of this specific moment. This word will flash HUGE on screen like a meme caption.
+    - It MUST be a single word (no spaces, no punctuation)
+    - It MUST be ALL CAPS (e.g. COOKED, AURA, IMPRESSED, CAUGHT, EXPOSED, REAL, DEAD, CLAPPED, WHO, NOPE, WAIT, WILD)
+    - Choose the word that would make someone STOP scrolling if they saw it flash on screen
+    - Match the energy: use COOKED/DONE for fails, AURA/REAL for swag moments, IMPRESSED/SHOCKED for reactions, CAUGHT/EXPOSED for drama, DEAD/CRYING for comedy
 
+TITLE FORMAT (CRITICAL — SHORT = MORE VIRAL):
+13. YouTube Shorts title MUST be MAXIMUM 50 characters (including emoji). Shorter titles create more curiosity and more clicks.
+    - Use curiosity gaps: leave the viewer wondering what happened (e.g. "He Did WHAT?! 😱", "Kai Is COOKED 💀", "Bro Said This... 😂")
+    - NEVER write long descriptive titles — if it explains too much, CUT IT DOWN
+    - Good examples: "Kai Is COOKED 💀", "Wait For It... 🤯", "Bro SNAPPED 😤🔥", "He Really Did That 😂"
+    - Bad examples: "Kai Cenat Makes His Cameraman Work Out and Gets Impressed By the Results" (too long, explains everything)
 
 Return ONLY a valid JSON array with exactly {top_n} objects. No markdown, no explanation, just raw JSON.
 
@@ -119,11 +119,15 @@ Each object must have exactly these fields:
   "start"         — float, seconds from start of video
   "end"           — float, seconds from start of video
   "caption_lines" — array of EXACTLY 3 strings. Line 1 = hook with 1 ALL CAPS word. Lines 2–3 = payoff with 1 more ALL CAPS word somewhere. Max 5 words/line. NO emoji in this field.
-  "emoji"         — 2 to 3 relevant emoji characters together (e.g. "🔥💀", "😱🚨", "😂🤡💀") — these appear at the END of the white text card in the video
+  "emoji"         — 2 to 3 relevant emoji characters together (e.g. "🔥💀", "😱🚨", "😂🤡💀")
   "score"         — integer, Viral potential score from 0 to 100
   "reasoning"     — string, a punchy 1-sentence explanation of exactly WHY this moment is highly viral
-  "title"         — string, A highly-clickable YouTube Shorts title (MAXIMUM 38 CHARACTERS). It MUST be 38 characters or less or it will get cut off on mobile!\
+  "title"         — string, SHORT curiosity-gap YouTube Shorts title (MAXIMUM 50 chars including emoji, e.g. "Kai Is COOKED 💀", "He Did WHAT?! 😱", "Bro SNAPPED 😤")
+  "hashtags"      — string, 6 to 10 highly relevant, topic-specific viral hashtags separated by spaces (e.g. "#{streamer} #StreamerDrama #FunnyClips #KickHighlights #ViralShorts")
+  "voiceover"     — string, A punchy 1-sentence hook narration for commentary (e.g. "Wait until you see how Kai reacted when this happened live...")
+  "aura_word"     — string, ONE single ALL CAPS word capturing this clip's energy (e.g. "COOKED", "AURA", "IMPRESSED", "CAUGHT", "DEAD", "WILD", "REAL", "WHO", "NOPE")
 """
+
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -224,14 +228,17 @@ async def score_moments(
                         emoji=item.get("emoji", "🔥"),
                         score=int(item.get("score", 90)),
                         reasoning=item.get("reasoning", "High energy moment."),
-                        title=item.get("title", " ".join(item.get("caption_lines", []))[:38]),
+                        title=item.get("title", " ".join(item.get("caption_lines", []))),
+                        hashtags=item.get("hashtags", f"#{display_streamer.replace(' ', '')} #StreamerHighlights #KickClips #TikTokViral #ReelsTrends #Shorts"),
+                        voiceover=item.get("voiceover", ""),
                         bgm_track=item.get("bgm_track", "hype"),
                         sfx_events=list(item.get("sfx_events", [])),
+                        aura_word=str(item.get("aura_word", "")).upper().strip(),
                     )
                     for i, item in enumerate(data)
                 ]
                 logger.info("Scored %d moments via model '%s'", len(moments), m)
-                return moments
+                return moments[:top_n]
 
             except json.JSONDecodeError as exc:
                 last_exc = exc
@@ -268,7 +275,8 @@ def _generate_fallback_moments(segments: list[dict], top_n: int = 10, streamer: 
                 emoji="🔥",
             )
         )
-    return fallback if fallback else [Moment(index=0, start=0.0, end=30.0, caption_lines=[f"{streamer} Stream", "Best Moments", "UNREAL"], emoji="🔥")]
+    res = fallback if fallback else [Moment(index=0, start=0.0, end=30.0, caption_lines=[f"{streamer} Stream", "Best Moments", "UNREAL"], emoji="🔥")]
+    return res[:top_n]
 
 
 # ── Master caption ──────────────────────────────────────────────────────────────
@@ -372,6 +380,12 @@ async def generate_clip_captions(
 
     async def _gen_one(i: int, m: Moment) -> str:
         headline = " / ".join(m.caption_lines) if hasattr(m, "caption_lines") else f"Clip {i+1}"
+        m_title = getattr(m, "title", "")
+        m_tags = getattr(m, "hashtags", "")
+        
+        if m_title and m_tags:
+            return f"{m_title}\n\n{m_tags}"
+
         user_content = f"Clip {i+1} Headline: {headline} {getattr(m, 'emoji', '🤯')}"
 
         try:
@@ -390,9 +404,9 @@ async def generate_clip_captions(
         except Exception as exc:
             logger.warning("Clip %d YouTube title generation failed: %s", i+1, exc)
 
-        # High-CTR Fallback
         fallback_title = f"{display_streamer} COULD NOT BELIEVE THIS HAPPENED! 😱"
-        return f"{fallback_title}\n\n{streamer_tag} #Shorts #YouTube #Viral #Trending #{display_streamer.replace(' ', '')}"
+        fallback_tags = f"{streamer_tag} #{display_streamer.replace(' ', '')}Clips #{display_streamer.replace(' ', '')}Live #StreamerHighlights #Shorts #Viral"
+        return f"{fallback_title}\n\n{fallback_tags}"
 
     results = await asyncio.gather(*(_gen_one(i, m) for i, m in enumerate(moments)))
     return list(results)

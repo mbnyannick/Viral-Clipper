@@ -33,6 +33,7 @@ async def deliver_clips(
     chat_id: int | str,
     moments: list | None = None,
     clip_captions: list[str] | None = None,
+    streamer: str = "Streamer",
 ) -> None:
     """
     Send each clip in *final_clips* as a separate numbered video message with
@@ -83,7 +84,8 @@ async def deliver_clips(
 
                 clean_title = html.escape(raw_title)
                 emoji = getattr(m, "emoji", "🤯") or "🤯"
-                copy_payload = f"{clean_title} {emoji}\n\n#Shorts #Viral #YouTube #Trending"
+                hashtags = getattr(m, "hashtags", "") or f"#{streamer.replace(' ', '')} #StreamerHighlights #KickClips #TikTokViral #ReelsTrends #Shorts"
+                copy_payload = f"{clean_title} {emoji}\n\n{hashtags}"
                 caption = (
                     f"📹 <b>Clip {i:02d}/{total:02d}</b> — ⚡ <i>Hook Score: {score}/100 ({tier})</i>\n\n"
                     f"💡 <i>{html.escape(reasoning)}</i>\n\n"
@@ -95,19 +97,22 @@ async def deliver_clips(
         if _is_admin_chat(chat_id):
             action_keyboard = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("🚀 Post to TikTok", callback_data=f"post:tiktok:{i}"),
-                    InlineKeyboardButton("🔴 Post to YouTube", callback_data=f"post:youtube:{i}"),
+                    InlineKeyboardButton("⚡ Post to ALL Now", callback_data=f"post:all:{i}"),
+                    InlineKeyboardButton("📅 Schedule Peak Time", callback_data=f"sched:all:{i}"),
                 ],
                 [
-                    InlineKeyboardButton("📸 Post to IG Reels", callback_data=f"post:instagram:{i}"),
-                    InlineKeyboardButton("📘 Post to Facebook", callback_data=f"post:facebook:{i}"),
+                    InlineKeyboardButton("📱 TikTok", callback_data=f"post:tiktok:{i}"),
+                    InlineKeyboardButton("🔴 YouTube", callback_data=f"post:youtube:{i}"),
+                    InlineKeyboardButton("📸 IG Reels", callback_data=f"post:instagram:{i}"),
+                    InlineKeyboardButton("📘 Facebook", callback_data=f"post:facebook:{i}"),
                 ],
                 [
-                    InlineKeyboardButton("🌐 Post to ALL", callback_data=f"post:all:{i}"),
-                ]
+                    InlineKeyboardButton("🗑️ Discard Clip", callback_data=f"discard:{i}"),
+                ],
             ])
         else:
             action_keyboard = None
+
 
         target_path = path
         if path.exists() and path.stat().st_size > 49 * 1024 * 1024:
@@ -153,8 +158,36 @@ async def deliver_clips(
 
     logger.info("All %d clips delivered", total)
 
-    # Deliver ZIP archive bundle for 1-tap download of all clips + captions
-    await deliver_zip_archive(final_clips, bot, chat_id, clip_captions=clip_captions)
+    # ── Schedule All summary prompt (admin only) ─────────────────────────────
+    if _is_admin_chat(chat_id) and total > 0:
+        sched_kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    f"📅 Schedule All {total} Clips to Peak Slots",
+                    callback_data=f"sched_all:confirm:{total}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "❌ Skip — I'll manage each clip manually",
+                    callback_data=f"sched_all:skip:{total}",
+                ),
+            ],
+        ])
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"📦 <b>All {total} clips are ready!</b>\n\n"
+                f"Tap <b>Schedule All</b> to automatically assign every clip to the next "
+                f"available peak slot across all platforms (TikTok, Instagram, Facebook, YouTube).\n\n"
+                f"⚠️ <i>You can cancel any individual clip from the queue before it fires — "
+                f"tap ❌ Cancel on that clip's message after scheduling.</i>"
+            ),
+            parse_mode="HTML",
+            reply_markup=sched_kb,
+        )
+
+
 
 
 async def deliver_zip_archive(

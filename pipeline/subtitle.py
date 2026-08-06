@@ -135,22 +135,16 @@ def build_word_subtitle_filter(
     segments: list[dict],
     clip_start: float,
     clip_end: float,
-    canvas_w: int = 720,
+    canvas_w: int = 2160,
     wm_y: int | None = None,
     font_path: str | None = None,
-    canvas_h: int = 1280,
+    canvas_h: int = 3840,
+    time_offset: float = 0.0,
 ) -> tuple[str | None, str | None]:
     """
     Build high-impact 9x16 vertical social subtitle filter.
-
-    Specs:
-    - Vertical Alignment: 67% from top of screen (65%-70% eye-level safe zone)
-    - Typography: Roboto Medium (500), UPPERCASE, 5.5% canvas height (~70px @ 1280h)
-    - Formatting: Max 2-3 words per line, center-aligned on X-axis
-    - Stroke & Shadow: 5px pure black outline, 4px 100% opacity drop shadow (shadowx=4, shadowy=4)
-    - Colors: Pure White (#FFFFFF) default, Vibrant Yellow (#FFD700) highlight
     """
-    speed_factor = 1.10
+    speed_factor = 1.00
     words: list[dict] = []
     for seg in segments:
         for w in seg.get("words", []):
@@ -158,8 +152,8 @@ def build_word_subtitle_filter(
             w_end = w["end"]
             if w_end < clip_start - 0.2 or w_start > clip_end + 0.2:
                 continue
-            rel_start = max(0.0, round((w_start - clip_start) / speed_factor, 3))
-            rel_end = max(rel_start + 0.05, round((w_end - clip_start) / speed_factor, 3))
+            rel_start = max(0.0, round((w_start - clip_start) / speed_factor, 3)) + round(time_offset, 3)
+            rel_end = max(rel_start + 0.05, round((w_end - clip_start) / speed_factor, 3) + round(time_offset, 3))
             raw_w = mask_profanity(_clean_word_text(w["word"]))
             if raw_w:
                 title_w = raw_w.capitalize()
@@ -170,9 +164,37 @@ def build_word_subtitle_filter(
                     "style": _get_word_style(raw_w),
                 })
 
+    if not words and segments:
+        for seg in segments:
+            seg_start = seg.get("start", 0.0)
+            seg_end = seg.get("end", 0.0)
+            if seg_end < clip_start - 0.2 or seg_start > clip_end + 0.2:
+                continue
+            txt = seg.get("text", "").strip()
+            raw_words = txt.split()
+            if not raw_words:
+                continue
+            dur = max(0.5, seg_end - seg_start)
+            w_dur = dur / len(raw_words)
+            for idx, rw in enumerate(raw_words):
+                w_s = seg_start + idx * w_dur
+                w_e = w_s + w_dur
+                rel_start = max(0.0, round((w_s - clip_start) / speed_factor, 3)) + round(time_offset, 3)
+                rel_end = max(rel_start + 0.05, round((w_e - clip_start) / speed_factor, 3) + round(time_offset, 3))
+                clean_w = mask_profanity(_clean_word_text(rw))
+                if clean_w:
+                    words.append({
+                        "word": _escape_ffmpeg_text(clean_w.capitalize()),
+                        "start": rel_start,
+                        "end": rel_end,
+                        "style": _get_word_style(clean_w),
+                    })
+
+
     if not words:
         logger.info("  No word timestamps for clip [%.1f-%.1f] — skipping subtitles", clip_start, clip_end)
         return None, None
+
 
     # Extract punch expression for the 1.2x zoom
     punch_words = []
@@ -187,22 +209,23 @@ def build_word_subtitle_filter(
             exprs.append(f"between(t,{pw['start']},{pw['end']+0.5})")
         punch_in_expr = "+".join(exprs)
 
-    # Group words into 3-4 word phrases
+    # Group words into max 2-word phrases so subtitles stay strictly on 1 single line
     phrases = []
     current_phrase = []
     for w in words:
         current_phrase.append(w)
-        # Break phrase if we have 3 words, or if there is a long pause > 0.4s
-        if len(current_phrase) >= 3:
+        # Break phrase if we have 2 words, or if there is a long pause > 0.35s
+        if len(current_phrase) >= 2:
             phrases.append(current_phrase)
             current_phrase = []
         elif w != words[-1]:
             next_w = words[words.index(w) + 1]
-            if next_w["start"] - w["end"] > 0.4:
+            if next_w["start"] - w["end"] > 0.35:
                 phrases.append(current_phrase)
                 current_phrase = []
     if current_phrase:
         phrases.append(current_phrase)
+
 
     # Generate ASS file content
     def _format_ass_time(sec: float) -> str:
@@ -215,10 +238,9 @@ def build_word_subtitle_filter(
             cs = 0
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
-    # Calculate exact vertical margin based on 67% of canvas_h
-    # ASS MarginV is from the bottom if Alignment=2
-    margin_v = int(canvas_h * 0.33)  # Bottom is 33% from the bottom edge = 67% from top
-    font_size = max(24, int(canvas_h * 0.035))
+    # Eye-level vertical position (360px from bottom = ~68% from top, safe zone)
+    margin_v = int(canvas_h * 0.28)  # 358px on 1280h
+    font_size = max(24, int(canvas_h * 0.038))
 
     ass_lines = [
         "[Script Info]",
@@ -228,8 +250,10 @@ def build_word_subtitle_filter(
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        # PrimaryColor is White (&H00FFFFFF), Outline is Black, Shadow is Black, Bold is 1 (True)
-        f"Style: Hormozi,Roboto Medium,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H99000000,1,0,0,0,100,100,0,0,1,3,3,2,20,20,{margin_v},1",
+        # Layer 1: Sharp Primary White Text with 1.2px crisp outline (CapCut Spec)
+        f"Style: Hormozi,Roboto Medium,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,1.2,0,2,20,20,{margin_v},1",
+        # Layer 0: CapCut Exact Outer Radial Text Glow Halo (White/Gold blur halo around letter contours)
+        f"Style: CapCutGlow,Roboto Medium,{font_size},&H00FFFFFF,&H00FFFFFF,&H00FFFFFF,&H00FFFFFF,1,0,0,0,100,100,0,0,1,4,0,2,20,20,{margin_v},1",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
@@ -237,28 +261,38 @@ def build_word_subtitle_filter(
 
     for p in phrases:
         p_start = p[0]["start"]
-        p_end = p[-1]["end"] + 0.1  # hold the last word slightly
-        
+        p_end = max(p_start + 0.5, p[-1]["end"] + 0.1)
+
+        # Non-overlapping sequential word highlighting inside the phrase
         for i, w in enumerate(p):
             line_start = w["start"] if i == 0 else p[i]["start"]
             line_end = p[i+1]["start"] if i + 1 < len(p) else p_end
-            
-            # If there's a gap between words in a phrase, don't let line_end overshoot
-            if i + 1 < len(p) and p[i+1]["start"] - w["end"] > 0.1:
-                line_end = w["end"] + 0.1
+            if line_end <= line_start:
+                line_end = line_start + 0.2
 
             text_parts = []
+            glow_parts = []
             for j, w2 in enumerate(p):
-                # When the word is actively being spoken
-                if j == i and w2.get("style"):
-                    # Emphasize special word with its color and Italic when spoken
-                    text_parts.append(f"{w2['style']}{w2['word']}{{\\c&HFFFFFF&\\i0}}")
+                if j == i:
+                    # Active spoken word gets vibrant yellow + gold glow
+                    style_tag = w2.get("style") or r"{\c&H00D7FF&\b1}"
+                    text_parts.append(f"{style_tag}{w2['word']}{{\\c&HFFFFFF&\\b0\\i0}}")
+                    glow_parts.append(f"{{\\c&H00D7FF&}}{w2['word']}{{\\c&HFFFFFF&}}")
                 else:
-                    # Non-special words remain plain bold white
                     text_parts.append(w2["word"])
-            
+                    glow_parts.append(w2["word"])
+
             text_line = " ".join(text_parts)
-            ass_lines.append(f"Dialogue: 0,{_format_ass_time(line_start)},{_format_ass_time(line_end)},Hormozi,,0,0,0,,{text_line}")
+            glow_line = " ".join(glow_parts)
+
+            # Layer 0: CapCut Outer Radial Glow Halo (\blur5\bord4 directly behind letter contours)
+            ass_lines.append(f"Dialogue: 0,{_format_ass_time(line_start)},{_format_ass_time(line_end)},CapCutGlow,,0,0,0,,{{\\blur5\\bord4}}{glow_line}")
+            # Layer 1: Crisp sharp primary text anchored steadily at eye-level
+            ass_lines.append(f"Dialogue: 1,{_format_ass_time(line_start)},{_format_ass_time(line_end)},Hormozi,,0,0,0,,{text_line}")
+
+
+
+
 
     import tempfile
     import uuid
@@ -267,3 +301,100 @@ def build_word_subtitle_filter(
 
     logger.info("  Generated ASS subtitles with %d phrases: %s", len(phrases), tmp_path)
     return str(tmp_path), punch_in_expr
+
+
+def build_aura_keyword_filter(
+    aura_word: str,
+    moment_duration: float,
+    canvas_w: int = 2160,
+    canvas_h: int = 3840,
+    font_path: str | None = None,
+    appear_at: float = 1.5,
+    hold_duration: float = 1.8,
+) -> str | None:
+    """
+    Build an FFmpeg drawtext filter that flashes a single cinematic keyword (*WORD*)
+    on screen at the clip's peak moment — like *COOKED*, *IMPRESSED*, *WHO* in viral thumbnails.
+
+    The word appears at `appear_at` seconds into the clip and stays for `hold_duration` seconds.
+    Style: massive yellow bold text with thick black stroke, centered, with a punch-in scale effect.
+
+    Returns a drawtext filter string to append to the FFmpeg filtergraph, or None if no word.
+    """
+    if not aura_word or not aura_word.strip():
+        return None
+
+    # Sanitize: single word only, all caps, no punctuation
+    word = re.sub(r"[^A-Za-z0-9]", "", aura_word.strip()).upper()
+    if not word:
+        return None
+
+    # Display with asterisks like *COOKED* for maximum visual impact
+    display_text = f"*{word}*"
+
+    # Escape for FFmpeg drawtext
+    safe_text = display_text.replace("'", "\u2019").replace(":", "\\:").replace("%", "\\%")
+
+    # Timing
+    t_start = max(0.1, appear_at)
+    t_end = min(moment_duration - 0.2, t_start + hold_duration)
+    if t_end <= t_start:
+        t_end = t_start + hold_duration
+
+    # Font sizing — massive, ~22% of canvas height
+    font_size = max(80, int(canvas_h * 0.095))
+
+    # Vertical center position (slightly above center for visual pop)
+    y_pos = int(canvas_h * 0.40)
+
+    # Font resolution — use bundled bold font if available
+    font_file_filter = ""
+    if font_path and Path(font_path).exists():
+        safe_fp = font_path.replace("'", "\u2019").replace(":", "\\:")
+        font_file_filter = f"fontfile='{safe_fp}':"
+    else:
+        # Try common paths
+        for fp in [
+            "assets/fonts/Inter-Bold.ttf",
+            "assets/fonts/Bold.otf",
+            "assets/fonts/Bold.ttf",
+        ]:
+            if Path(fp).exists():
+                safe_fp = fp.replace(":", "\\:")
+                font_file_filter = f"fontfile='{safe_fp}':"
+                break
+
+    # Build the punch-in scale animation:
+    # - Zoom from 85% → 100% very quickly over first 0.15s (punchy entrance)
+    # - Hold at full size for the rest of hold_duration
+    # We simulate scaling by modulating fontsize with a conditional expression
+    punch_expr = (
+        f"if(lt(t-{t_start:.3f}\\,0.15)"
+        f"\\,{int(font_size * 0.85)}+({font_size}-{int(font_size * 0.85)})*(t-{t_start:.3f})/0.15"
+        f"\\,{font_size})"
+    )
+
+    # Visibility: only show between t_start and t_end
+    enable_expr = f"between(t\\,{t_start:.3f}\\,{t_end:.3f})"
+
+    # Build complete drawtext filter — yellow text, thick black border, drop shadow
+    drawtext_filter = (
+        f"drawtext="
+        f"{font_file_filter}"
+        f"text='{safe_text}':"
+        f"fontsize={font_size}:"
+        f"fontcolor=#FFD700:"
+        f"borderw=6:"
+        f"bordercolor=black:"
+        f"shadowx=4:shadowy=4:shadowcolor=black@0.9:"
+        f"x=(w-text_w)/2:"
+        f"y={y_pos}-text_h/2:"
+        f"bold=1:"
+        f"enable='{enable_expr}'"
+    )
+
+    logger.info(
+        "  Aura keyword overlay: *%s* @ %.1fs-%.1fs (font_size=%d)",
+        word, t_start, t_end, font_size,
+    )
+    return drawtext_filter

@@ -21,21 +21,31 @@ load_dotenv()
 
 
 def _cleanup_old_tmp_files() -> None:
-    """Housekeeper job: removes old temporary run folders in tmp/ older than 2 hours."""
-    tmp_dir = Path("tmp")
-    if not tmp_dir.exists():
-        return
+    """Housekeeper job: removes temp working folders older than 2h and output MP4s older than 48h."""
     now = time.time()
-    cutoff = 2 * 3600
-    for item in tmp_dir.iterdir():
-        if item.is_dir() and item.name != "telegram_uploads":
+    tmp_dir = Path("tmp")
+    if tmp_dir.exists():
+        cutoff_tmp = 2 * 3600
+        for item in tmp_dir.iterdir():
+            if item.is_dir() and item.name != "telegram_uploads":
+                try:
+                    if now - item.stat().st_mtime > cutoff_tmp:
+                        shutil.rmtree(item, ignore_errors=True)
+                        logging.info("Auto-housekeeper cleaned old temp folder: %s", item.name)
+                except Exception as exc:
+                    logging.warning("Housekeeper cleanup failed for %s: %s", item, exc)
+
+    output_dir = Path("output")
+    if output_dir.exists():
+        cutoff_output = 48 * 3600  # Delete rendered MP4 clips older than 48 hours
+        for vid in output_dir.glob("*.mp4"):
             try:
-                mtime = item.stat().st_mtime
-                if now - mtime > cutoff:
-                    shutil.rmtree(item, ignore_errors=True)
-                    logging.info("Auto-housekeeper cleaned old temp folder: %s", item.name)
+                if now - vid.stat().st_mtime > cutoff_output:
+                    vid.unlink(missing_ok=True)
+                    logging.info("Auto-housekeeper cleaned published clip: %s", vid.name)
             except Exception as exc:
-                logging.warning("Housekeeper cleanup failed for %s: %s", item, exc)
+                logging.warning("Output clip cleanup failed for %s: %s", vid.name, exc)
+
 
 
 def _setup_logging() -> None:
@@ -82,10 +92,13 @@ def main() -> None:
         handle_message,
         handle_queue,
         handle_revoke,
+        handle_schedule,
+        handle_start,
         handle_stop,
         handle_update,
         handle_users,
     )
+    from bot.scheduler import run_scheduler_loop
 
     from telegram.request import HTTPXRequest
 
@@ -99,7 +112,8 @@ def main() -> None:
 
     # Register interactive commands
     app.add_handler(CommandHandler("help", handle_help))
-    app.add_handler(CommandHandler("start", handle_help))
+    app.add_handler(CommandHandler("start", handle_start))
+
     app.add_handler(CommandHandler("brief", handle_brief))
     app.add_handler(CommandHandler("update", handle_update))
     app.add_handler(CommandHandler("status", handle_update))
@@ -109,6 +123,14 @@ def main() -> None:
     app.add_handler(CommandHandler("clear", handle_clear))
     app.add_handler(CommandHandler("users", handle_users))
     app.add_handler(CommandHandler("revoke", handle_revoke))
+    app.add_handler(CommandHandler("schedule", handle_schedule))
+
+    async def _post_init(application) -> None:
+        import asyncio
+        asyncio.create_task(run_scheduler_loop())
+        logger.info("Peak-hour scheduler background task started.")
+
+    app.post_init = _post_init
 
     # Register button callback handler for layout selection
     app.add_handler(CallbackQueryHandler(handle_callback_query))

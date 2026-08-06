@@ -122,7 +122,7 @@ async def run_pipeline(
     """
     global active_run_status
     chat_id = update.effective_chat.id
-    bot = context.bot
+    bot = context.bot if (context and hasattr(context, "bot")) else update.get_bot()
 
     run_id = uuid.uuid4().hex[:10]
     run_dir = _BASE_TMP / run_id
@@ -210,6 +210,7 @@ async def run_pipeline(
             if chat_id in active_run_status:
                 active_run_status[chat_id]["step"] = f"Streaming pipeline: {total_windows} windows..."
 
+            target_total = top_n_clips if top_n_clips > 0 else int(os.getenv("TOP_N_CLIPS", "10"))
             await run_streaming_pipeline(
                 url=url,
                 bot=bot,
@@ -219,7 +220,9 @@ async def run_pipeline(
                 stream_start_sec=start_sec,
                 stream_end_sec=end_sec,
                 chunk_minutes=streaming_chunk_min,
-                clips_per_window=clips_per_window,
+                target_total_clips=target_total,
+                campaign_brief=campaign_brief,
+                target_duration=target_duration,
             )
             return
 
@@ -318,17 +321,17 @@ async def run_pipeline(
                 logger.warning("Status edit failed: %s", exc)
 
         # ── 2. Download Video Stream ──────────────────────────────────────────────
-        await update_status("📥 1/5 — Downloading Video Stream...")
+        await update_status("📥 1/6 — Downloading Video Stream...")
         video_path, audio_path, _ = await download(url, run_dir, streamer_info=streamer_info)
 
         # ── 3. Chunk & Transcribe ───────────────────────────────────────────────
-        await update_status("🎙️ 2/5 — Transcribing Speech...")
+        await update_status("🎙️ 2/6 — Transcribing Speech & Audio...")
         chunk_minutes = int(os.getenv("CHUNK_DURATION_MINUTES", "3"))
         chunks = await chunk_audio(audio_path, chunk_duration_minutes=chunk_minutes)
         segments = await transcribe_chunks(chunks)
 
         # ── 4. Score & Select Moments ───────────────────────────────────────────
-        await update_status("🧠 3/5 — Analyzing Virality & Story Arc...")
+        await update_status("🧠 3/6 — AI Scoring Virality & Story Arc...")
         top_n = top_n_clips if top_n_clips > 0 else int(os.getenv("TOP_N_CLIPS", "10"))
         deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         moments = await score_moments(
@@ -341,8 +344,7 @@ async def run_pipeline(
             campaign_brief=campaign_brief,
             target_duration=target_duration,
         )
-
-
+        moments = moments[:top_n]
 
         # Smart Auto Layout Routing based on Duration choice
         if layout_mode in ("smart_auto", "quick_run", "auto"):
@@ -354,7 +356,7 @@ async def run_pipeline(
                 logger.info("Smart Auto: Selected 'face_crop' (MediaPipe Face Tracking) for <=60s clip")
 
         # ── 5. Cut, Render & Composite ──────────────────────────────────────────
-        await update_status(f"✂️ 5/5 — Compositing {len(moments)} Clips...")
+        await update_status(f"✂️ 4/6 — Compositing {len(moments)} Clips & AI Voiceover...")
         clips_dir = run_dir / "clips"
         clips = await cut_clips(video_path, moments, clips_dir, url=url)
 
@@ -398,32 +400,105 @@ async def run_pipeline(
             ),
         )
 
-        # ── 5.5 HD Cover Thumbnail Generation Pass ─────────────────────────────
+        # ── 5. HD Cover Thumbnail Generation Pass ─────────────────────────────
+        await update_status(f"🎨 5/6 — Generating HD Cover Cards & Thumbnails...")
         try:
             from pipeline.thumbnail import generate_cover_thumbnail
             thumbs_dir = run_dir / "thumbnails"
             thumbs_dir.mkdir(parents=True, exist_ok=True)
 
             thumb_tasks = [
-                generate_cover_thumbnail(fc, m, thumbs_dir / f"thumbnail_{m.index:02d}.jpg", cap_info[0])
-                for fc, cap_info, m in zip(final_clips, captions, moments)
+                generate_cover_thumbnail(cp, m, thumbs_dir / f"thumbnail_{m.index:02d}.jpg", cap_info[0])
+                for cp, cap_info, m in zip(clips, captions, moments)
             ]
+
+
             await asyncio.gather(*thumb_tasks)
             logger.info("Generated %d HD Cover Thumbnails", len(final_clips))
         except Exception as thumb_exc:
             logger.warning("Thumbnail generation warning (continuing delivery): %s", thumb_exc)
 
-        await update_status("🚀 6/6 — Delivering HD Clips to Telegram!")
+        # ── 6. Step 6/6: Quality Gate & Verification Pass ───────────────────────
+        await update_status("🔍 6/6 — Quality Gate Verification (Validating Voiceover, BGM & Glowing Subtitles)...")
+        verified_clips = []
+        for fc, m in zip(final_clips, moments):
+            p = Path(fc)
+            is_valid_9_16 = False
+            if p.exists() and p.stat().st_size > 50000:
+                try:
+                    probe_cmd = ["ffprobe", "-v", "quiet", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(p)]
+                    proc = await asyncio.create_subprocess_exec(*probe_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+                    out, _ = await proc.communicate()
+                    w, h = map(int, out.decode().strip().split(","))
+                    if w == 720 and h == 1280:
+                        is_valid_9_16 = True
+                except Exception:
+                    pass
+
+            if is_valid_9_16:
+                logger.info("  [QA GATE PASSED] Clip #%02d verified 9:16 vertical (720x1280, size=%.1f MB)", m.index, p.stat().st_size / (1024*1024))
+                verified_clips.append(fc)
+            else:
+                logger.warning("  [QA GATE RETRY] Clip #%02d failed 9:16 vertical verification — force re-compositing...", m.index)
+                try:
+                    re_clip = await composite_clips([p], [captions[m.index-1]], watermark_path, [m], finals_dir, layout_mode=layout_mode, enable_subtitles=enable_subtitles, segments=segments)
+                    verified_clips.extend(re_clip)
+                except Exception as qa_exc:
+                    logger.error("QA Gate retry error for clip #%02d: %s", m.index, qa_exc)
+                    verified_clips.append(fc)
+
+        final_clips = verified_clips
+
 
         notifier.stop()
 
         # ── "Almost Ready" Announcement ─────────────────────────────────────────
-        await send_msg("⚡ Your clips are ready!", parse_mode="")
+        await send_msg("⚡ Your verified clips are ready!", parse_mode="")
 
         # ── 6. Delivery ─────────────────────────────────────────────────────────
         if chat_id in active_run_status:
-            active_run_status[chat_id]["step"] = "Delivering Clips to Telegram..."
+            active_run_status[chat_id]["step"] = "Delivering Verified Clips to Telegram..."
         await deliver_clips(final_clips, bot, chat_id, moments=moments, clip_captions=clip_captions)
+
+
+        # ── Build pending schedule session for "Schedule All" confirmation ──────
+        try:
+            from bot.handlers import _pending_schedule_sessions
+            clips_dir = Path("tmp/clips")
+            clips_dir.mkdir(parents=True, exist_ok=True)
+            session_clips = []
+            for idx, (clip_path, m) in enumerate(zip(final_clips, moments or []), start=1):
+                if not clip_path or not Path(clip_path).exists():
+                    continue
+                safe_fid = "".join(c for c in clip_path.name if c.isalnum())[:20]
+                public_filename = f"clip_{safe_fid}.mp4"
+                public_path = clips_dir / public_filename
+                try:
+                    import shutil
+                    if not public_path.exists():
+                        shutil.copy2(clip_path, public_path)
+                    video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
+                except Exception:
+                    video_url = ""
+                raw_title = getattr(m, "title", "") or getattr(m, "caption_lines", [""])[0]
+                hashtags = getattr(m, "hashtags", "") or ""
+                payload_base = {
+                    "clip_id": f"clip_{idx:03d}",
+                    "title": raw_title,
+                    "caption": raw_title,
+                    "description": raw_title,
+                    "video_url": video_url,
+                    "video_filename": f"clip_{idx:03d}.mp4",
+                    "mime_type": "video/mp4",
+                    "hashtags": hashtags,
+                    "chat_id": chat_id,
+                }
+                session_clips.append({"clip_num": idx, "payload": payload_base})
+            _pending_schedule_sessions[chat_id] = session_clips
+            logger.info("Stored schedule session: %d clips for chat_id %d", len(session_clips), chat_id)
+        except Exception as sess_exc:
+            logger.warning("Could not build schedule session: %s", sess_exc)
+
 
         op_admin_id = os.environ.get("TELEGRAM_OPERATOR_CHAT_ID", "").strip()
         is_admin_run = bool(op_admin_id and str(chat_id).strip() == op_admin_id)

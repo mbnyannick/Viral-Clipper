@@ -34,3 +34,11 @@ env/
 
 # Large bundled fonts (download separately — see README)
 assets/fonts/NotoColorEmoji.ttf
+
+# Temporary media & scratch scripts
+*.mp4
+*.png
+*.wav
+*_blueprint.json
+fix_n8n.py
+build_clean_n8n.py

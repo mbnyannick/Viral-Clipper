@@ -15,6 +15,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from bot.run_pipeline import run_pipeline
+from bot.scheduler import next_peak_slot, scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,9 @@ _active_tasks_by_chat: dict[int, tuple[asyncio.Task, str]] = {}
 _pending_links: dict[int, dict] = {}
 # Store active campaign brief per chat_id: chat_id -> str
 _campaign_briefs: dict[int, str] = {}
+# Store clip sessions awaiting "Schedule All" confirmation: chat_id -> list of clip dicts
+_pending_schedule_sessions: dict[int, list[dict]] = {}
+
 
 # Persistent approved users database path
 APPROVED_USERS_FILE = Path("approved_users.json")
@@ -40,29 +44,30 @@ APPROVED_USERS_FILE = Path("approved_users.json")
 def _make_layout_keyboard(target_duration: str = "auto") -> InlineKeyboardMarkup:
     buttons = [
         [
-            InlineKeyboardButton("🤖 Smart Auto (Best Match)", callback_data="fmt:smart_auto"),
+            InlineKeyboardButton("👤 Face Tracking (9:16 Fullscreen)", callback_data="fmt:face_crop"),
         ],
         [
-            InlineKeyboardButton("🖤 Black Canvas", callback_data="fmt:black_canvas"),
-            InlineKeyboardButton("🎬 Blurred Background", callback_data="fmt:blurred_frame"),
+            InlineKeyboardButton("🔲 1:1 Square (Blurred BG)", callback_data="fmt:square_blur"),
+            InlineKeyboardButton("🖤 1:1 Square (Black)", callback_data="fmt:square_black"),
+            InlineKeyboardButton("🩷 1:1 Square (Pink)", callback_data="fmt:square_pink"),
         ],
         [
-            InlineKeyboardButton("🔴 Red Canvas", callback_data="fmt:red_canvas"),
-            InlineKeyboardButton("🔵 Blue Canvas", callback_data="fmt:blue_canvas"),
-            InlineKeyboardButton("🟣 Purple Canvas", callback_data="fmt:purple_canvas"),
+            InlineKeyboardButton("🎬 4:3 (Blurred BG)", callback_data="fmt:blurred_frame"),
+            InlineKeyboardButton("🖤 4:3 (Black)", callback_data="fmt:black_canvas"),
+            InlineKeyboardButton("🩷 4:3 (Pink)", callback_data="fmt:pink_canvas"),
+        ],
+        [
+            InlineKeyboardButton("🔴 1:1 Red", callback_data="fmt:square_red"),
+            InlineKeyboardButton("🔵 1:1 Blue", callback_data="fmt:square_blue"),
+            InlineKeyboardButton("🟣 1:1 Purple", callback_data="fmt:square_purple"),
+            InlineKeyboardButton("🩶 1:1 Grey", callback_data="fmt:square_grey"),
+        ],
+        [
+            InlineKeyboardButton("❌ Cancel", callback_data="wiz:cancel"),
         ],
     ]
-
-    # Face tracking is active for <=60s durations (0_30, 30_60, auto)
-    if target_duration in ("0_30", "30_60", "auto"):
-        buttons.insert(2, [
-            InlineKeyboardButton("👤 Face Tracking (Dynamic AI Cuts)", callback_data="fmt:face_crop"),
-        ])
-
-    buttons.append([
-        InlineKeyboardButton("❌ Cancel", callback_data="wiz:cancel"),
-    ])
     return InlineKeyboardMarkup(buttons)
+
 
 
 def _make_watermark_keyboard() -> InlineKeyboardMarkup:
@@ -324,16 +329,6 @@ async def handle_brief(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-# Queue tuple: (url, update, context, layout_mode, enable_watermark, enable_silence_cut, top_n_clips, campaign_brief, target_duration)
-_job_queue: asyncio.Queue[tuple[str, Update, ContextTypes.DEFAULT_TYPE, str, bool, bool, int, str, str]] = asyncio.Queue()
-_worker_task: asyncio.Task | None = None
-_current_job_url: str | None = None
-_active_pipeline_task: asyncio.Task | None = None
-
-# Store pending link submissions awaiting button clicks: chat_id -> dict
-_pending_links: dict[int, dict] = {}
-# Store active campaign brief per chat_id: chat_id -> str
-_campaign_briefs: dict[int, str] = {}
 
 
 async def _launch_job(chat_id: int, num_clips: int, target_duration: str = "auto", edit_message=None) -> None:
@@ -359,11 +354,18 @@ async def _launch_job(chat_id: int, num_clips: int, target_duration: str = "auto
     dur_label = dur_map.get(target_duration, "⚡ Automatic (25–60s)")
 
     mode_map = {
-        "black_canvas": "🖤 Black Canvas",
-        "blurred_frame": "🎬 Blurred Background",
-        "red_canvas": "🔴 Red Canvas",
-        "blue_canvas": "🔵 Blue Canvas",
-        "purple_canvas": "🟣 Purple Canvas",
+        "black_canvas": "🖤 Black Canvas (4:3)",
+        "blurred_frame": "🎬 Blurred BG (4:3)",
+        "pink_canvas": "🩷 Pink Canvas (4:3)",
+        "red_canvas": "🔴 Red Canvas (4:3)",
+        "blue_canvas": "🔵 Blue Canvas (4:3)",
+        "purple_canvas": "🟣 Purple Canvas (4:3)",
+        "square_blur": "🔲 1:1 Square (Blurred BG)",
+        "square_pink": "🩷 1:1 Square (Pink Canvas)",
+        "square_black": "🖤 1:1 Square (Black Canvas)",
+        "square_red": "🔴 1:1 Square (Red Canvas)",
+        "square_blue": "🔵 1:1 Square (Blue Canvas)",
+        "square_purple": "🟣 1:1 Square (Purple Canvas)",
         "face_crop": "👤 Face Tracking",
     }
     mode_label = mode_map.get(layout_mode, "🖤 Black Canvas")
@@ -454,11 +456,26 @@ def _ensure_worker_running() -> None:
         _WORKER_TASKS.append(t)
 
 
-async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Command /help (or /start) — shows admin guide to Master Admin and user guide to approved users."""
+async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Command /start — short welcome message."""
     if not update.effective_user or not _is_operator(update.effective_user.id):
         await _handle_unapproved_user(update, context)
         return
+
+    msg = (
+        "⚡ <b>Welcome to VIRAL Clip Bot!</b>\n\n"
+        "Send any video link (YouTube, Twitch, Kick) or upload a video file to generate viral vertical clips!\n\n"
+        "📖 <i>Need help or command options? Type /help to view the full guide.</i>"
+    )
+    await update.message.reply_text(msg, parse_mode="HTML")
+
+
+async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Command /help — shows full admin guide to Master Admin and user guide to approved users."""
+    if not update.effective_user or not _is_operator(update.effective_user.id):
+        await _handle_unapproved_user(update, context)
+        return
+
 
     if _is_master_admin(update.effective_user.id):
         # ── Master Admin Guide ─────────────────────────────────────────────────
@@ -550,40 +567,43 @@ async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 
-def _get_or_recover_session(chat_id: int, update: Update, query=None) -> dict | None:
-    """Get active link session or auto-recover from message text so button clicks never expire."""
+# Store last submitted video URL per chat_id: chat_id -> str
+_last_submitted_url: dict[int, str] = {}
+
+
+def _get_or_recover_session(chat_id: int, update: Update, query=None, context=None) -> dict | None:
+    """Get active link session or auto-recover from session cache or message text so button clicks never expire."""
     session = _pending_links.get(chat_id)
     if session:
+        if context and not session.get("context"):
+            session["context"] = context
         return session
 
-    # Reconstruct session directly from Telegram message text if missing (e.g. after bot restart)
-    if query and query.message and query.message.text:
+    # Reconstruct session using stored URL cache or message text
+    url = _last_submitted_url.get(chat_id)
+    if not url and query and query.message and query.message.text:
         text = query.message.text
         match = _URL_RE.search(text)
         if match:
             url = match.group(0)
-            layout = "black_canvas"
-            if "Face Tracking" in text:
-                layout = "face_crop"
-            elif "Blurred Background" in text or "Blurred Frame" in text:
-                layout = "blurred_frame"
-            elif "Red Canvas" in text:
-                layout = "red_canvas"
-            elif "Blue Canvas" in text:
-                layout = "blue_canvas"
-            elif "Purple Canvas" in text:
-                layout = "purple_canvas"
 
-            session = {
-                "url": url,
-                "update": update,
-                "context": None,
-                "layout_mode": layout,
-                "enable_watermark": False,
-            }
-            _pending_links[chat_id] = session
-            return session
+    if url:
+        session = {
+            "url": url,
+            "update": update,
+            "context": context,
+            "layout_mode": "face_crop",
+            "enable_watermark": False,
+            "enable_subtitles": True,
+            "num_clips": 10,
+            "target_duration": "auto",
+        }
+        _pending_links[chat_id] = session
+        return session
+
+
     return None
+
 
 
 def _extract_title_and_caption(caption_text: str, clip_num: str) -> tuple[str, str]:
@@ -642,6 +662,102 @@ def _update_keyboard_posted(reply_markup: InlineKeyboardMarkup, platform: str) -
     return InlineKeyboardMarkup(new_rows)
 
 
+async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAULT_TYPE, platform: str, clip_num: str) -> None:
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    msg = query.message if query else None
+
+    webhook_url = os.environ.get("MAKE_WEBHOOK_URL", "https://150-136-108-208.sslip.io/webhook/viral-post").strip()
+    if not webhook_url:
+        if query:
+            await query.answer("⚠️ No Webhook URL set.", show_alert=True)
+        return
+
+    if msg and msg.reply_markup:
+        try:
+            posting_kb = _update_keyboard_posting(msg.reply_markup, platform)
+            await query.edit_message_reply_markup(reply_markup=posting_kb)
+        except Exception as k_exc:
+            logger.warning("Could not update keyboard to posting state: %s", k_exc)
+
+    video_url = ""
+    raw_caption = msg.caption if msg and msg.caption else ""
+    title_text, clean_caption, extracted_hashtags = _extract_title_and_caption(raw_caption, clip_num)
+
+    if msg and msg.video:
+        try:
+            tg_file = await context.bot.get_file(msg.video.file_id)
+            clips_dir = Path("tmp/clips")
+            clips_dir.mkdir(parents=True, exist_ok=True)
+            safe_fid = "".join(c for c in msg.video.file_id if c.isalnum())[:20]
+            public_filename = f"clip_{safe_fid}.mp4"
+            public_path = clips_dir / public_filename
+            if not public_path.exists():
+                await tg_file.download_to_drive(public_path)
+            video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
+            logger.info("Direct public video URL: %s", video_url)
+        except Exception as f_exc:
+            logger.warning("Could not download clip for public server: %s", f_exc)
+            try:
+                tg_file = await context.bot.get_file(msg.video.file_id)
+                video_url = tg_file.file_path or ""
+            except Exception:
+                pass
+
+    logger.info("Publishing clip to platform '%s', clip_num %s, video_url='%s'", platform, clip_num, video_url)
+    payload = {
+        "platform": platform,
+        "clip_id": f"clip_{int(clip_num):03d}",
+        "title": title_text,
+        "caption": clean_caption,
+        "description": clean_caption,
+        "video_url": video_url,
+        "video_filename": f"clip_{int(clip_num):03d}.mp4",
+        "mime_type": "video/mp4",
+        "hashtags": extracted_hashtags,
+        "chat_id": chat_id,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    logger.info("Sending to publisher: %s", payload)
+
+    def _post_json_sync(url: str, post_data: dict) -> tuple[int, str]:
+        import json
+        import urllib.request
+        data_bytes = json.dumps(post_data).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data_bytes,
+            headers={"Content-Type": "application/json", "User-Agent": "ViralBot/1.0"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=15) as response:
+            return response.status, response.read().decode("utf-8", errors="replace")
+
+    try:
+        status_code, body_text = await asyncio.to_thread(_post_json_sync, webhook_url, payload)
+        if status_code in (200, 201, 202):
+            if msg and msg.reply_markup:
+                try:
+                    posted_kb = _update_keyboard_posted(msg.reply_markup, platform)
+                    await msg.edit_reply_markup(reply_markup=posted_kb)
+                except Exception as k_exc:
+                    logger.warning("Could not update keyboard to posted state: %s", k_exc)
+
+            await msg.reply_text(
+                f"✅ **Sent to Publisher!**\n\n"
+                f"• **Platform:** `{platform.upper()}`\n"
+                f"• **Clip:** #{clip_num}\n"
+                f"• **Status:** Publishing Triggered Successfully",
+                parse_mode="Markdown",
+            )
+        else:
+            await msg.reply_text(f"⚠️ Publishing system returned HTTP status {status_code}.")
+    except Exception as http_exc:
+        logger.error("Publisher dispatch error: %s", http_exc)
+        await msg.reply_text(f"❌ Failed to reach Publishing System: {http_exc}")
+    return
+
+
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles button taps from Telegram Inline Keyboards."""
     query = update.callback_query
@@ -651,7 +767,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     data = query.data
     chat_id = update.effective_chat.id
 
-    # Handle Master Admin approval button clicks
+    # Always answer callback query immediately to stop Telegram loading spinner
+    try:
+        await query.answer()
+    except Exception:
+        pass
+
     if data.startswith("app:"):
         if not _is_master_admin(update.effective_user.id):
             await query.answer("🚫 Only the Master Admin can approve users.", show_alert=True)
@@ -684,56 +805,146 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(f"❌ Access request rejected for User `{target_uid}`.", parse_mode="Markdown")
         return
 
-    if not _is_operator(update.effective_user.id):
-        await query.answer("Unauthorized", show_alert=True)
-        return
-
-    await query.answer()
-    data = query.data
-    chat_id = update.effective_chat.id
-
     if data.startswith("done:"):
         done_target = data.split(":")[1]
         await query.answer(f"✅ Already submitted for {done_target.upper()}!", show_alert=True)
         return
 
-    # Handle Publishing / Make.com Auto-Post Action Buttons (post:tiktok:1, post:youtube:1, post:instagram:1, post:facebook:1, post:all:1)
     if data.startswith("post:"):
         if not update.effective_user or not _is_master_admin(update.effective_user.id):
             await query.answer("🔒 Auto-Posting is restricted to the Admin's connected social media accounts.", show_alert=True)
             return
-
         parts = data.split(":")
         platform = parts[1]
         clip_num = parts[2] if len(parts) > 2 else "1"
+        await _handle_social_post_button(update, context, platform, clip_num)
+        return
 
-        webhook_url = os.environ.get("MAKE_WEBHOOK_URL", "https://hook.us1.make.com/rprg1wxutz1xbnfefulz8e1569vnarzv").strip()
-        if not webhook_url:
-            await query.answer("⚠️ No Make.com Webhook URL set.", show_alert=True)
+
+    if data.startswith("sched_all:"):
+        parts = data.split(":")
+        action = parts[1]   # "confirm" or "skip"
+        total_clips = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+
+        if action == "skip":
+            await query.answer("👍 Got it — manage clips individually.", show_alert=False)
+            await query.edit_message_text(
+                "⏭️ <b>Skipped auto-schedule.</b>\n\nUse the buttons on each individual clip to post or schedule them manually.",
+                parse_mode="HTML",
+            )
+            _pending_schedule_sessions.pop(chat_id, None)
             return
 
-        msg = query.message
-        if msg and msg.reply_markup:
-            try:
-                posting_kb = _update_keyboard_posting(msg.reply_markup, platform)
-                await msg.edit_reply_markup(reply_markup=posting_kb)
-            except Exception as k_exc:
-                logger.warning("Could not update keyboard to posting state: %s", k_exc)
+        if action == "confirm":
+            if not update.effective_user or not _is_master_admin(update.effective_user.id):
+                await query.answer("🔒 Only the Admin can schedule all clips.", show_alert=True)
+                return
+
+            session_clips = _pending_schedule_sessions.get(chat_id, [])
+            if not session_clips:
+                await query.answer("⚠️ No clip session found. Please re-process the video.", show_alert=True)
+                return
+
+            await query.answer("📅 Scheduling all clips...", show_alert=False)
+            await query.edit_message_text(
+                f"⏳ <b>Scheduling {len(session_clips)} clips to peak slots...</b>",
+                parse_mode="HTML",
+            )
+
+            platforms = ["tiktok", "instagram", "facebook", "youtube"]
+            scheduled_lines = []
+
+            for clip in session_clips:
+                clip_num = clip.get("clip_num", "?")
+                payload_base = clip.get("payload", {})
+                staggered_map = scheduler.schedule_clip_staggered(platforms, payload_base)
+                from zoneinfo import ZoneInfo
+                ET = ZoneInfo("America/New_York")
+                for plat, fire_at in staggered_map.items():
+                    slot_str = fire_at.astimezone(ET).strftime("%b %d %I:%M%p ET")
+                    emoji = {"tiktok": "📱", "instagram": "📸", "facebook": "📘", "youtube": "🔴"}.get(plat, "🌐")
+                    scheduled_lines.append(f"{emoji} Clip #{clip_num} → {slot_str}")
+
+            # Send schedule confirmation with cancel button for each clip
+            preview_text = "\n".join(scheduled_lines[:40])  # cap display at 40 lines
+            if len(scheduled_lines) > 40:
+                preview_text += f"\n<i>...and {len(scheduled_lines) - 40} more slots</i>"
+
+            cancel_kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ Cancel All Scheduled Posts", callback_data="sched_all:cancel_all:0")],
+            ])
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"✅ <b>All {len(session_clips)} clips scheduled!</b>\n\n"
+                    f"{preview_text}\n\n"
+                    f"💡 <i>Use /schedule to review. Tap ❌ Cancel All to wipe the queue if needed.</i>"
+                ),
+                parse_mode="HTML",
+                reply_markup=cancel_kb,
+            )
+            _pending_schedule_sessions.pop(chat_id, None)
+            return
+
+        if action == "cancel_all":
+            if not update.effective_user or not _is_master_admin(update.effective_user.id):
+                await query.answer("🔒 Only the Admin can cancel all.", show_alert=True)
+                return
+            # Clear entire queue for this chat
+            scheduler._queue = [item for item in scheduler._queue if item.get("chat_id") != chat_id]
+            scheduler._save()
+            await query.answer("🗑️ All scheduled posts cancelled.", show_alert=True)
+            await query.edit_message_text(
+                "🗑️ <b>All your scheduled posts have been cancelled.</b>\n\nThe queue is now empty. Use the individual clip buttons to re-schedule.",
+                parse_mode="HTML",
+            )
+    if data.startswith("discard:"):
+        if not update.effective_user or not _is_master_admin(update.effective_user.id):
+            await query.answer("🔒 Only the Admin can discard clips.", show_alert=True)
+            return
+        clip_num = data.split(":")[1] if ":" in data else "?"
+        await query.answer(f"🗑️ Clip #{clip_num} Discarded!", show_alert=True)
+        try:
+            await query.edit_message_caption(
+                caption=f"🗑️ <b>Clip #{clip_num} DISCARDED</b>\n\n<i>This clip has been removed from QA review.</i>",
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+        except Exception:
+            pass
+        return
+
+    if data.startswith("sched:"):
+
+
+        if not update.effective_user or not _is_master_admin(update.effective_user.id):
+            await query.answer("🔒 Scheduling is restricted to the Admin.", show_alert=True)
+            return
+        parts = data.split(":")
+        sched_platform = parts[1]  # "all" or specific platform
+        clip_num = parts[2] if len(parts) > 2 else "1"
+        msg = query.message if query else None
+        raw_caption = msg.caption if msg and msg.caption else ""
+        title_text, clean_caption, extracted_hashtags = _extract_title_and_caption(raw_caption, clip_num)
 
         video_url = ""
-        raw_caption = msg.caption if msg and msg.caption else ""
-        title_text, clean_caption = _extract_title_and_caption(raw_caption, clip_num)
-
         if msg and msg.video:
             try:
                 tg_file = await context.bot.get_file(msg.video.file_id)
-                video_url = tg_file.file_path
-            except Exception as f_exc:
-                logger.warning("Could not get Telegram video download link: %s", f_exc)
+                clips_dir = Path("tmp/clips")
+                clips_dir.mkdir(parents=True, exist_ok=True)
+                safe_fid = "".join(c for c in msg.video.file_id if c.isalnum())[:20]
+                public_filename = f"clip_{safe_fid}.mp4"
+                public_path = clips_dir / public_filename
+                if not public_path.exists():
+                    await tg_file.download_to_drive(public_path)
+                video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
+            except Exception as exc:
+                logger.warning("Scheduler: could not resolve video URL: %s", exc)
 
-        logger.info("Preparing Make.com webhook payload for platform '%s', clip_num %s, video_url='%s'", platform, clip_num, video_url)
-        payload = {
-            "platform": platform,
+        platforms = ["tiktok", "instagram", "facebook", "youtube"] if sched_platform == "all" else [sched_platform]
+
+        base_payload = {
             "clip_id": f"clip_{int(clip_num):03d}",
             "title": title_text,
             "caption": clean_caption,
@@ -741,59 +952,40 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "video_url": video_url,
             "video_filename": f"clip_{int(clip_num):03d}.mp4",
             "mime_type": "video/mp4",
-            "hashtags": "#Shorts #Viral #TikTok #Reels #Facebook",
+            "hashtags": extracted_hashtags,
             "chat_id": chat_id,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
-        logger.info("Sending Make.com webhook payload: %s", payload)
 
-        def _post_json_sync(url: str, post_data: dict) -> tuple[int, str]:
-            import json
-            import urllib.request
-            data_bytes = json.dumps(post_data).encode("utf-8")
-            req = urllib.request.Request(
-                url,
-                data=data_bytes,
-                headers={"Content-Type": "application/json", "User-Agent": "ViralBot/1.0"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=15) as response:
-                return response.status, response.read().decode("utf-8", errors="replace")
+        scheduler.schedule_clip_staggered(platforms, base_payload)
 
-        try:
-            status_code, body_text = await asyncio.to_thread(_post_json_sync, webhook_url, payload)
-            if status_code in (200, 201, 202):
-                if msg and msg.reply_markup:
-                    try:
-                        posted_kb = _update_keyboard_posted(msg.reply_markup, platform)
-                        await msg.edit_reply_markup(reply_markup=posted_kb)
-                    except Exception as k_exc:
-                        logger.warning("Could not update keyboard to posted state: %s", k_exc)
-
-                await msg.reply_text(
-                    f"✅ **Sent to Make.com!**\n\n"
-                    f"• **Platform:** `{platform.upper()}`\n"
-                    f"• **Clip:** #{clip_num}\n"
-                    f"• **Status:** Webhook Triggered Successfully",
-                    parse_mode="Markdown",
-                )
-            else:
-                await msg.reply_text(f"⚠️ Make.com returned HTTP status {status_code}.")
-        except Exception as http_exc:
-            logger.error("Make.com webhook dispatch error: %s", http_exc)
-            await msg.reply_text(f"❌ Failed to reach Make.com webhook: {http_exc}")
+        preview = scheduler.get_schedule_preview(clip_num, platforms)
+        await query.answer("📅 Scheduled!", show_alert=False)
+        await query.message.reply_text(preview, parse_mode="HTML")
         return
 
     if data.startswith("pub:mobile:"):
         clip_num = data.split("pub:mobile:")[1]
-        await query.answer(f"📱 1-Tap Mobile Upload for Clip #{clip_num}!", show_alert=True)
-        await query.message.reply_text(
-            f"🚀 **1-Tap Mobile Upload Ready for Clip #{clip_num}!**\n\n"
-            f"1. Tap the title box above to copy title & hashtags.\n"
-            f"2. Long-press the video file above and save to your camera roll.\n"
-            f"3. Open YouTube Shorts / TikTok / Reels app and post in 1 tap!",
-            parse_mode="Markdown",
+        msg = query.message if query else None
+        raw_caption = msg.caption if msg and msg.caption else ""
+        title_text, clean_caption, extracted_hashtags = _extract_title_and_caption(raw_caption, clip_num)
+
+        await query.answer(f"📱 1-Tap Copy for Clip #{clip_num}!", show_alert=True)
+
+        copy_text = f"{title_text}\n\n{clean_caption}\n\n{extracted_hashtags}".strip()
+        copy_card = (
+            f"📱 <b>TikTok & Mobile Upload Ready for Clip #{clip_num}!</b>\n\n"
+            f"👇 <i>Tap the box below ONCE to copy Title + Hashtags:</i>\n\n"
+            f"<code>{html.escape(copy_text)}</code>\n\n"
+            f"💡 <i>Steps: Tap to copy box ➔ Long-press video to save to camera roll ➔ Open TikTok & paste!</i>"
         )
+
+        open_tt_kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📲 Open TikTok App", url="https://www.tiktok.com/"),
+            ]
+        ])
+
+        await query.message.reply_text(copy_card, reply_markup=open_tt_kb, parse_mode="HTML")
         return
 
 
@@ -805,7 +997,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if data == "wiz:back_layout":
-        session = _get_or_recover_session(chat_id, update, query)
+        session = _get_or_recover_session(chat_id, update, query, context)
         url = session.get("url", "") if session else ""
         title_label = f"🎬 **Video URL:**\n`{url}`" if url else "🎬 **Video link received!**"
         await query.edit_message_text(
@@ -818,7 +1010,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if data == "wiz:back_wm":
-        session = _get_or_recover_session(chat_id, update, query)
+        session = _get_or_recover_session(chat_id, update, query, context)
         layout_mode = session.get("layout_mode", "black_canvas") if session else "black_canvas"
         mode_label = "👤 Face Tracking" if layout_mode == "face_crop" else "🎬 Blurred Background" if layout_mode == "blurred_frame" else "🖤 Black Canvas"
         await query.edit_message_text(
@@ -830,7 +1022,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if data == "wiz:back_sub":
-        session = _get_or_recover_session(chat_id, update, query)
+        session = _get_or_recover_session(chat_id, update, query, context)
         layout_mode = session.get("layout_mode", "black_canvas") if session else "black_canvas"
         mode_label = "👤 Face Tracking" if layout_mode == "face_crop" else "🎬 Blurred Background" if layout_mode == "blurred_frame" else "🖤 Black Canvas"
         await query.edit_message_text(
@@ -842,7 +1034,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if data == "wiz:back_clips":
-        session = _get_or_recover_session(chat_id, update, query)
+        session = _get_or_recover_session(chat_id, update, query, context)
         layout_mode = session.get("layout_mode", "black_canvas") if session else "black_canvas"
         mode_label = "👤 Face Tracking" if layout_mode == "face_crop" else "🎬 Blurred Background" if layout_mode == "blurred_frame" else "🖤 Black Canvas"
         sub_label = "💬 Enabled" if session.get("enable_subtitles", True) else "🚫 Disabled"
@@ -857,7 +1049,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Step 1: Layout Selected -> Prompt for Watermark (Step 2)
     if data == "fmt:quick_run":
-        session = _get_or_recover_session(chat_id, update, query)
+        session = _get_or_recover_session(chat_id, update, query, context)
         if not session:
             await query.edit_message_text("⚠️ Session expired. Please re-send your video URL.")
             return
@@ -870,7 +1062,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
     if data.startswith("fmt:"):
         layout_mode = data.split("fmt:")[1]
-        session = _get_or_recover_session(chat_id, update, query)
+        session = _get_or_recover_session(chat_id, update, query, context)
         if not session:
             await query.edit_message_text("⚠️ Session expired. Please re-send your video URL.")
             return
@@ -889,7 +1081,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     # Step 2: Watermark Option Tapped
     if data.startswith("wm:"):
         choice = data.split("wm:")[1]
-        session = _get_or_recover_session(chat_id, update, query)
+        session = _get_or_recover_session(chat_id, update, query, context)
         if not session:
             await query.edit_message_text("⚠️ Session expired. Please re-send your video URL.")
             return
@@ -920,7 +1112,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     # Step 3: Subtitles Option Tapped -> Prompt for Clip Count
     if data.startswith("sub:"):
         choice = data.split("sub:")[1]
-        session = _get_or_recover_session(chat_id, update, query)
+        session = _get_or_recover_session(chat_id, update, query, context)
         if not session:
             await query.edit_message_text("⚠️ Session expired. Please re-send your video URL.")
             return
@@ -948,7 +1140,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         except ValueError:
             num_clips = 10
 
-        session = _get_or_recover_session(chat_id, update, query)
+        session = _get_or_recover_session(chat_id, update, query, context)
         if not session:
             await query.edit_message_text("⚠️ Session expired. Please re-send your video URL.")
             return
@@ -970,10 +1162,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     # Step 4: Clip Duration Option Tapped -> Launch Job
     if data.startswith("dur:"):
         target_duration = data.split("dur:")[1]
-        session = _get_or_recover_session(chat_id, update, query)
+        session = _get_or_recover_session(chat_id, update, query, context)
         if not session:
             await query.edit_message_text("⚠️ Session expired. Please re-send your video URL.")
             return
+
 
         num_clips = session.get("num_clips", 10)
         await _launch_job(chat_id, num_clips, target_duration=target_duration, edit_message=query.message)
@@ -1125,10 +1318,17 @@ async def handle_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("ℹ️ Your queue was already empty.")
 
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message:
+async def handle_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Command /schedule — shows pending scheduled posts for this user."""
+    if not update.effective_user or not _is_operator(update.effective_user.id):
         return
+    chat_id = update.effective_chat.id
+    summary = scheduler.get_pending_summary(chat_id)
+    await update.message.reply_text(summary, parse_mode="HTML")
 
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id if update.effective_user else 0
     chat_id = update.effective_chat.id if update.effective_chat else 0
 
@@ -1294,11 +1494,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await handle_help(update, context)
         return
 
+    _last_submitted_url[chat_id] = url_target
     _pending_links[chat_id] = {
         "url": url_target,
         "update": update,
         "context": context,
     }
+
 
     keyboard = _make_layout_keyboard()
 

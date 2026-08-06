@@ -16,8 +16,8 @@ from .score import Moment
 
 logger = logging.getLogger(__name__)
 
-THUMB_W = 1080
-THUMB_H = 1920
+THUMB_W = 2160
+THUMB_H = 3840
 
 
 async def generate_cover_thumbnail(
@@ -103,24 +103,11 @@ async def generate_cover_thumbnail(
 
         canvas = Image.alpha_composite(canvas, overlay)
 
-        # Overlay caption title badge if provided
-        if caption_png_path and caption_png_path.exists():
-            try:
-                cap_img = Image.open(caption_png_path).convert("RGBA")
-                # Scale caption badge to 80% of thumbnail width
-                target_w = int(THUMB_W * 0.85)
-                cw, ch = cap_img.size
-                target_h = int(ch * (target_w / cw))
-                cap_resized = cap_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+        # Clean 1080x1920 HD Cover snapshot (NO text overlay or card clutter)
+        canvas.convert("RGB").save(str(output_path), "JPEG", quality=95)
+        logger.info("  Generated Clean HD Cover Snapshot: %s (1080x1920)", output_path.name)
 
-                cap_x = (THUMB_W - target_w) // 2
-                cap_y = 160  # Top position below status bar
-                canvas.paste(cap_resized, (cap_x, cap_y), cap_resized)
-            except Exception as cap_exc:
-                logger.warning("Could not overlay caption badge on thumbnail: %s", cap_exc)
 
-        canvas.convert("RGB").save(str(output_path), "JPEG", quality=92)
-        logger.info("  Generated HD Cover Thumbnail: %s (1080x1920)", output_path.name)
     except Exception as exc:
         logger.warning("Thumbnail composite error (%s) — using raw frame fallback", exc)
         raw_frame_path.rename(output_path)
