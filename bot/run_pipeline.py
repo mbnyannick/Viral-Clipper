@@ -428,9 +428,8 @@ async def run_pipeline(
                 try:
                     probe_cmd = ["ffprobe", "-v", "quiet", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(p)]
                     proc = await asyncio.create_subprocess_exec(*probe_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-                    out, _ = await proc.communicate()
                     w, h = map(int, out.decode().strip().split(","))
-                    if w == 720 and h == 1280:
+                    if (w * 16 == h * 9) or (w == 1080 and h == 1920) or (w == 2160 and h == 3840) or (w == 720 and h == 1280) or (h > w):
                         is_valid_9_16 = True
                 except Exception:
                     pass
