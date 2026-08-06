@@ -477,14 +477,14 @@ async def _composite_one(
         mix_inputs.append("[vo_a]")
 
     if bgm_input_idx is not None:
-        audio_mix_filters.append(f"[{bgm_input_idx}:a]volume=0.15,aloop=loop=-1:size=2e+09[bgm_a]")  # Smooth 15% background music bed
+        audio_mix_filters.append(f"[{bgm_input_idx}:a]volume=0.25,aloop=loop=-1:size=2e+09[bgm_a]")  # Balanced 25% background music bed
         mix_inputs.append("[bgm_a]")
 
     if sfx_input_idx is not None:
         # Detect exact millisecond of physical action peak
         sfx_peak_sec = _detect_action_motion_peak(clip_path)
         sfx_delay_ms = int((sfx_peak_sec + vo_dur) * 1000)
-        audio_mix_filters.append(f"[{sfx_input_idx}:a]volume=1.2,adelay=delays={sfx_delay_ms}|{sfx_delay_ms}[sfx_a]")
+        audio_mix_filters.append(f"[{sfx_input_idx}:a]volume=0.25,adelay=delays={sfx_delay_ms}|{sfx_delay_ms}[sfx_a]")
         mix_inputs.append("[sfx_a]")
 
     if len(mix_inputs) > 1:

@@ -238,9 +238,9 @@ def build_word_subtitle_filter(
             cs = 0
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
-    # Eye-level vertical position (360px from bottom = ~68% from top, safe zone)
-    margin_v = int(canvas_h * 0.28)  # 358px on 1280h
-    font_size = max(24, int(canvas_h * 0.038))
+    # Eye-level vertical position (lower 22% from bottom, clean safe zone)
+    margin_v = int(canvas_h * 0.22)
+    font_size = max(40, int(canvas_h * 0.040))
 
     ass_lines = [
         "[Script Info]",
@@ -250,10 +250,8 @@ def build_word_subtitle_filter(
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        # Layer 1: Sharp Primary White Text with 1.2px crisp outline (CapCut Spec)
-        f"Style: Hormozi,Roboto Medium,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,1.2,0,2,20,20,{margin_v},1",
-        # Layer 0: CapCut Exact Outer Radial Text Glow Halo (White/Gold blur halo around letter contours)
-        f"Style: CapCutGlow,Roboto Medium,{font_size},&H00FFFFFF,&H00FFFFFF,&H00FFFFFF,&H00FFFFFF,1,0,0,0,100,100,0,0,1,4,0,2,20,20,{margin_v},1",
+        # Clean viral style — pure white text with thick black outline & drop shadow
+        f"Style: ViralSub,Inter-Bold,{font_size},&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,1,2,20,20,{margin_v},1",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
@@ -261,7 +259,7 @@ def build_word_subtitle_filter(
 
     for p in phrases:
         p_start = p[0]["start"]
-        p_end = max(p_start + 0.5, p[-1]["end"] + 0.1)
+        p_end = max(p_start + 0.5, p[-1]["end"] + 0.15)
 
         # Non-overlapping sequential word highlighting inside the phrase
         for i, w in enumerate(p):
@@ -270,25 +268,18 @@ def build_word_subtitle_filter(
             if line_end <= line_start:
                 line_end = line_start + 0.2
 
-            text_parts = []
-            glow_parts = []
+            words_formatted = []
             for j, w2 in enumerate(p):
+                word_clean = w2["word"]
                 if j == i:
-                    # Active spoken word gets vibrant yellow + gold glow
-                    style_tag = w2.get("style") or r"{\c&H00D7FF&\b1}"
-                    text_parts.append(f"{style_tag}{w2['word']}{{\\c&HFFFFFF&\\b0\\i0}}")
-                    glow_parts.append(f"{{\\c&H00D7FF&}}{w2['word']}{{\\c&HFFFFFF&}}")
+                    # Highlight active spoken word in vibrant yellow (&H00FFFF& in ASS format)
+                    words_formatted.append(f"{{\\c&H00FFFF&\\b1}}{word_clean}{{\\c&HFFFFFF&\\b1}}")
                 else:
-                    text_parts.append(w2["word"])
-                    glow_parts.append(w2["word"])
+                    words_formatted.append(word_clean)
 
-            text_line = " ".join(text_parts)
-            glow_line = " ".join(glow_parts)
-
-            # Layer 0: CapCut Outer Radial Glow Halo (\blur5\bord4 directly behind letter contours)
-            ass_lines.append(f"Dialogue: 0,{_format_ass_time(line_start)},{_format_ass_time(line_end)},CapCutGlow,,0,0,0,,{{\\blur5\\bord4}}{glow_line}")
-            # Layer 1: Crisp sharp primary text anchored steadily at eye-level
-            ass_lines.append(f"Dialogue: 1,{_format_ass_time(line_start)},{_format_ass_time(line_end)},Hormozi,,0,0,0,,{text_line}")
+            full_line = " ".join(words_formatted)
+            # Single crisp dialogue layer (prevents duplicate text ghosting & overlap)
+            ass_lines.append(f"Dialogue: 0,{_format_ass_time(line_start)},{_format_ass_time(line_end)},ViralSub,,0,0,0,,{full_line}")
 
 
 
