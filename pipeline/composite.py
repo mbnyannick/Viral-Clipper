@@ -531,7 +531,8 @@ async def _composite_one(
         except Exception:
             pass
 
-        # Robust vertical 9:16 fallback rendering that STILL applies 720x1280 vertical layout & captions!
+        # Robust vertical 9:16 fallback rendering using a unique temp output path to prevent input/output collision
+        fb_out = out_path.with_name(f"fb_{out_path.name}")
         cmd_fallback = [
             "ffmpeg", "-y",
             "-i", str(clip_path),
@@ -541,12 +542,14 @@ async def _composite_one(
             "-map", "0:a?",
             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
             "-c:a", "aac",
-            str(out_path),
+            str(fb_out),
         ]
         try:
             p2 = await asyncio.create_subprocess_exec(*cmd_fallback, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
             _, err2 = await asyncio.wait_for(p2.communicate(), timeout=120.0)
-            if p2.returncode != 0:
+            if p2.returncode == 0 and fb_out.exists():
+                shutil.move(fb_out, out_path)
+            else:
                 logger.error("Fallback render failed: %s", err2.decode(errors='replace')[-300:])
         except Exception as fb_exc:
             logger.error("Fallback render exception: %s", fb_exc)
