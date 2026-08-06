@@ -391,8 +391,20 @@ async def _composite_one(
         bgm_input_idx = a_idx
         a_idx += 1
 
-    sfx_file = Path("assets/sfx/whoosh.wav")
-    if sfx_file.exists():
+    # ── 3.5 Dynamic SFX Selection from 92+ Sound Effect Library ─────────────
+    sfx_dir = Path("assets/sfx")
+    sfx_files = (
+        list(sfx_dir.glob("*.mp3")) +
+        list(sfx_dir.glob("*.wav")) +
+        list(sfx_dir.glob("*.m4a")) +
+        list(sfx_dir.glob("*.mp4"))
+    )
+    sfx_file = None
+    if sfx_files:
+        sfx_file = sfx_files[moment.index % len(sfx_files)]
+        logger.info("  Using viral SFX effect (%d in library): %s", len(sfx_files), sfx_file.name)
+
+    if sfx_file and sfx_file.exists():
         inputs.extend(["-i", str(sfx_file)])
         sfx_input_idx = a_idx
         a_idx += 1
