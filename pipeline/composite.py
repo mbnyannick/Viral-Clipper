@@ -463,39 +463,35 @@ async def _composite_one(
         a_idx += 1
 
 
-    # Mute/delay original clip audio during Voiceover lead-in
+    # Mute/delay original clip audio during Voiceover lead-in (resampled to 48kHz stereo)
     if vo_dur > 0:
         delay_ms = int(vo_dur * 1000)
-        audio_mix_filters = [f"[0:a]volume=1.3,adelay=delays={delay_ms}|{delay_ms}[orig_a]"]
+        audio_mix_filters = [f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.3,adelay=delays={delay_ms}|{delay_ms}[orig_a]"]
     else:
-        audio_mix_filters = ["[0:a]volume=1.3[orig_a]"]
+        audio_mix_filters = ["[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.3[orig_a]"]
 
     mix_inputs = ["[orig_a]"]
 
     if vo_input_idx is not None:
-        audio_mix_filters.append(f"[{vo_input_idx}:a]volume=8.0[vo_a]")  # Super loud, booming crystal clear voiceover
+        audio_mix_filters.append(f"[{vo_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=8.0[vo_a]")
         mix_inputs.append("[vo_a]")
 
     if bgm_input_idx is not None:
-        audio_mix_filters.append(f"[{bgm_input_idx}:a]volume=0.25,aloop=loop=-1:size=2e+09[bgm_a]")  # Balanced 25% background music bed
+        audio_mix_filters.append(f"[{bgm_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.25,aloop=loop=-1:size=2e+09[bgm_a]")
         mix_inputs.append("[bgm_a]")
 
     if sfx_input_idx is not None:
         # Detect exact millisecond of physical action peak
         sfx_peak_sec = _detect_action_motion_peak(clip_path)
         sfx_delay_ms = int((sfx_peak_sec + vo_dur) * 1000)
-        audio_mix_filters.append(f"[{sfx_input_idx}:a]volume=0.25,adelay=delays={sfx_delay_ms}|{sfx_delay_ms}[sfx_a]")
+        audio_mix_filters.append(f"[{sfx_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.25,adelay=delays={sfx_delay_ms}|{sfx_delay_ms}[sfx_a]")
         mix_inputs.append("[sfx_a]")
 
     if len(mix_inputs) > 1:
         mix_str = "".join(mix_inputs)
-        audio_mix_filters.append(f"{mix_str}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=2:normalize=0[outa]")
+        audio_mix_filters.append(f"{mix_str}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=0:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[outa]")
     else:
-        audio_mix_filters.append("[orig_a]anull[outa]")
-
-
-
-
+        audio_mix_filters.append("[orig_a]aformat=sample_rates=48000:channel_layouts=stereo[outa]")
 
     af_chain = ";".join(audio_mix_filters)
     filter_complex = f"{vf};{af_chain}"
@@ -510,7 +506,8 @@ async def _composite_one(
         *_get_v_encoder_args(),
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
-        "-b:a", "192k",
+        "-b:a", "320k",
+        "-ar", "48000",
         str(out_path),
     ]
 
