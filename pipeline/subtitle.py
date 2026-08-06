@@ -238,6 +238,16 @@ def build_word_subtitle_filter(
         logger.info("  No word timestamps for clip [%.1f-%.1f] — skipping subtitles", clip_start, clip_end)
         return None, None
 
+    # Deduplicate consecutive identical words/timestamps
+    dedup_words = []
+    for w in words:
+        if dedup_words:
+            last = dedup_words[-1]
+            if w["word"] == last["word"] and abs(w["start"] - last["start"]) < 0.3:
+                continue
+        dedup_words.append(w)
+    words = dedup_words
+
     # Group words into snappy 1 to 3-word phrases (Kai Cenat short-form subtitle pacing)
     phrases = []
     current_phrase = []
@@ -249,16 +259,6 @@ def build_word_subtitle_filter(
             phrases.append(current_phrase)
             current_phrase = []
 
-    def _format_ass_time(sec: float) -> str:
-        h = int(sec // 3600)
-        m = int((sec % 3600) // 60)
-        s = int(sec % 60)
-        cs = int(round((sec - int(sec)) * 100))
-        if cs == 100:
-            s += 1
-            cs = 0
-        return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
-
     import pysubs2
 
     subs = pysubs2.SSAFile()
@@ -266,7 +266,7 @@ def build_word_subtitle_filter(
     subs.info["PlayResY"] = str(canvas_h)
     subs.info["WrapStyle"] = "2"  # Strict single horizontal line
 
-    # Exact KaiStyle specification: Bebas Neue, Primary White (&H00FFFFFF), Secondary Yellow (&H0000FFFF), 4px Black Outline, 0 Shadow, Alignment=5
+    margin_v = int(canvas_h * 0.18)  # Lower safe zone below speaker chin/chest
     font_size = max(52, int(canvas_w * 0.072))
     style = pysubs2.SSAStyle(
         fontname="Bebas Neue",
@@ -286,16 +286,19 @@ def build_word_subtitle_filter(
         borderstyle=1,                                 # Outline + Shadow
         outline=4.0,                                   # 4px Outline
         shadow=0.0,                                    # 0 Shadow
-        alignment=5,                                  # Alignment 5 (Center)
+        alignment=2,                                  # Alignment 2 (Bottom-Center)
         marginl=10,
         marginr=10,
-        marginv=10,
+        marginv=margin_v,
     )
     subs.styles["KaiStyle"] = style
 
-    for p in phrases:
+    for idx, p in enumerate(phrases):
         p_start_ms = int(p[0]["start"] * 1000)
-        p_end_ms = int((p[-1]["end"] + 0.03) * 1000)
+        p_end_ms = int(p[-1]["end"] * 1000)
+        if idx < len(phrases) - 1:
+            next_start_ms = int(phrases[idx + 1][0]["start"] * 1000)
+            p_end_ms = min(p_end_ms, max(p_start_ms + 100, next_start_ms - 10))
 
         karaoke_parts = []
         for i, w in enumerate(p):
