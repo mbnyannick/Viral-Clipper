@@ -4,6 +4,7 @@ and Inline Keyboard Layout Selector (Pillarbox vs. Face-Crop).
 """
 
 import asyncio
+import html
 import json
 import logging
 import os
@@ -12,6 +13,7 @@ import time
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from bot.run_pipeline import run_pipeline
@@ -134,6 +136,45 @@ def _make_duration_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("❌ Cancel", callback_data="wiz:cancel"),
         ],
     ])
+
+
+async def _safe_edit_message_text(query, **kwargs) -> None:
+    if not query:
+        return
+    try:
+        await query.edit_message_text(**kwargs)
+    except BadRequest as exc:
+        msg = str(exc)
+        if any(err in msg for err in ("Message is not modified", "Query is too old", "message to edit not found", "MESSAGE_ID_INVALID")):
+            logger.debug("Ignored Telegram edit error: %s", exc)
+            return
+        raise
+
+
+async def _safe_edit_message_reply_markup(query, reply_markup) -> None:
+    if not query:
+        return
+    try:
+        await query.edit_message_reply_markup(reply_markup=reply_markup)
+    except BadRequest as exc:
+        msg = str(exc)
+        if any(err in msg for err in ("Message is not modified", "Query is too old", "message to edit not found", "MESSAGE_ID_INVALID")):
+            logger.debug("Ignored Telegram edit error: %s", exc)
+            return
+        raise
+
+
+async def _safe_edit_message_caption(query, **kwargs) -> None:
+    if not query:
+        return
+    try:
+        await query.edit_message_caption(**kwargs)
+    except BadRequest as exc:
+        msg = str(exc)
+        if any(err in msg for err in ("Message is not modified", "Query is too old", "message to edit not found", "MESSAGE_ID_INVALID")):
+            logger.debug("Ignored Telegram caption edit error: %s", exc)
+            return
+        raise
 
 
 def _load_approved_users() -> dict[int, dict]:
@@ -479,88 +520,110 @@ async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if _is_master_admin(update.effective_user.id):
         # ── Master Admin Guide ─────────────────────────────────────────────────
-        msg = (
-            "👑 *VIRAL Clip Bot — Admin Control Panel*\n\n"
-            "Welcome back, Admin\! You have full control over this bot and all approved users\.\n\n"
-            "───\n\n"
-            "📐 *4 Simple Steps:*\n"
-            "1\\. Send any video link or upload a video file\.\n"
-            "2\\. Choose a canvas style \\(Black Canvas, Blurred Background, Face Tracking, etc\\.\\) or tap `⚡ Quick Run`\.\n"
-            "3\\. Choose how many clips to generate \\(3, 5, 10, 20, 50 or custom\\)\.\n"
-            "4\\. Choose clip duration \\(Automatic, 0\\-30s, 15\\-30s, 30s\\-1m, 1\\-2m\\)\.\n"
-            "💡 *Tip:* Use `↩️ Back` or `❌ Cancel` at any step to change your selections or start over\.\n\n"
-            "───\n\n"
-            "🌐 *Supported Platforms:*\n"
-            "• ▶️ YouTube \\& YouTube Shorts\n"
-            "• 🟣 Twitch \\(VODs \\& Clips\\)\n"
-            "• 🟩 Kick \\(VODs only\\)\n"
-            "• 📁 Direct video file upload\n\n"
-            "───\n\n"
-            "🎬 *What Each Clip Includes:*\n"
-            "• Viral moment cut to 9:16 vertical\n"
-            "• Bold punch\-word title caption at top\n"
-            "• Word\-by\-word subtitles with sentiment colors \\(🔴red/🟢green/🟡yellow\\)\n"
-            "• Your watermark logo\n"
-            "• YouTube title \\& hashtags ready to copy\n\n"
-            "───\n\n"
-            "🛠️ *User Commands:*\n"
-            "• `/help` — Show this guide\n"
-            "• `/update` — Check your real\-time video status\n"
-            "• `/queue` — View waiting queue\n"
-            "• `/stop` — Cancel active processing\n"
-            "• `/cancel` — Reset wizard options\n"
-            "• `/clear` — Clear pending queue\n\n"
-            "───\n\n"
-            "🔐 *Admin\\-Only Commands:*\n"
-            "• `/users` — View all approved users \\& live status \\(🟢Active/⚪Idle\\)\n"
-            "• `/revoke <user\\_id>` — Remove a user's access\n"
-            "• `/brief <rules>` — Set campaign rules for all clips\n\n"
-            "───\n\n"
-            "🔔 *Access Requests:*\n"
-            "When a new user opens the bot, you will receive a private alert card with "
-            "`✅ Approve` and `❌ Reject` buttons\\. Only you can approve or deny access\."
-        )
+        msg = r"""
+👑 *VIRAL Clip Bot — Admin Control Panel*
+
+Welcome back, Admin! You have full control over this bot and all approved users.
+
+───
+
+📐 *4 Simple Steps:*
+1. Send any video link or upload a video file.
+2. Choose a canvas style (Black Canvas, Blurred Background, Face Tracking, etc.) or tap `⚡ Quick Run`.
+3. Choose how many clips to generate (3, 5, 10, 20, 50 or custom).
+4. Choose clip duration (Automatic, 0-30s, 15-30s, 30s-1m, 1-2m).
+💡 *Tip:* Use `↩️ Back` or `❌ Cancel` at any step to change your selections or start over.
+
+───
+
+🌐 *Supported Platforms:*
+• ▶️ YouTube & YouTube Shorts
+• 🟣 Twitch (VODs & Clips)
+• 🟩 Kick (VODs only)
+• 📁 Direct video file upload
+
+───
+
+🎬 *What Each Clip Includes:*
+• Viral moment cut to 9:16 vertical
+• Bold punch-word title caption at top
+• Word-by-word subtitles with sentiment colors (🔴red/🟢green/🟡yellow)
+• Your watermark logo
+• YouTube title & hashtags ready to copy
+
+───
+
+🛠️ *User Commands:*
+• `/help` — Show this guide
+• `/update` — Check your real-time video status
+• `/queue` — View waiting queue
+• `/stop` — Cancel active processing
+• `/cancel` — Reset wizard options
+• `/clear` — Clear pending queue
+
+───
+
+🔐 *Admin-Only Commands:*
+• `/users` — View all approved users & live status (🟢Active/⚪Idle)
+• `/revoke <user_id>` — Remove a user's access
+• `/brief <rules>` — Set campaign rules for all clips
+
+───
+
+🔔 *Access Requests:*
+When a new user opens the bot, you will receive a private alert card with `✅ Approve` and `❌ Reject` buttons. Only you can approve or deny access.
+"""
     else:
         # ── Regular Approved User Guide ────────────────────────────────────────
-        msg = (
-            "🎬 *VIRAL Clip Bot — Your Quick Guide*\n\n"
-            "Welcome\! Send any video link and this bot will automatically extract the best "
-            "viral moments as ready\\-to\\-post vertical clips\.\n\n"
-            "───\n\n"
-            "📐 *4 Simple Steps:*\n"
-            "1\\. Send a video link \\(YouTube, Twitch, Kick, or upload a file\\)\.\n"
-            "2\\. Choose your clip style \\(Black Canvas, Blurred Background, Face Tracking, etc\.\\)\.\n"
-            "3\\. Choose how many clips you want \\(3, 5, 10, 20, or type any number\\)\.\n"
-            "4\\. Choose clip duration \\(Automatic, 0\\-30s, 15\\-30s, 30s\\-1m, 1\\-2m\\)\.\n"
-            "💡 *Tip:* Use `↩️ Back` or `❌ Cancel` at any step to change your options\.\n\n"
-            "───\n\n"
-            "🌐 *Supported Platforms:*\n"
-            "• ▶️ YouTube \\& YouTube Shorts\n"
-            "• 🟣 Twitch \\(VODs \\& Clips\\)\n"
-            "• 🟩 Kick \\(VODs only\\)\n"
-            "• 📁 Direct video file upload\n\n"
-            "───\n\n"
-            "📦 *What You'll Receive:*\n"
-            "• Top viral moments cut into 9:16 vertical clips\.\n"
-            "• Bold punch\-word title caption on each clip\.\n"
-            "• 🔴🟢🟡 Word\-by\-word subtitles synced to the speaker's voice\.\n"
-            "• A ready\-to\-copy YouTube title \\& hashtags under each video\.\n"
-            "• A full titles summary card at the end for easy copy\-pasting\.\n"
-            "• A ZIP file with all clips and titles in one download\.\n\n"
-            "───\n\n"
-            "🛠️ *Commands:*\n"
-            "• `/help` — Show this guide\n"
-            "• `/update` — Check your processing status\n"
-            "• `/queue` — See how many videos are waiting\n"
-            "• `/stop` — Cancel your active video\n"
-            "• `/cancel` — Reset wizard options\n"
-            "• `/clear` — Clear your waiting queue\n\n"
-            "───\n\n"
-            "💡 *Tips:*\n"
-            "• Processing takes a few minutes — you'll be notified when clips are ready\.\n"
-            "• You can queue multiple links and they'll process one by one automatically\.\n"
-            "• Tap any YouTube title box to copy it instantly on mobile\."
-        )
+        msg = r"""
+🎬 *VIRAL Clip Bot — Your Quick Guide*
+
+Welcome! Send any video link and this bot will automatically extract the best viral moments as ready-to-post vertical clips.
+
+───
+
+📐 *4 Simple Steps:*
+1. Send a video link (YouTube, Twitch, Kick, or upload a file).
+2. Choose your clip style (Black Canvas, Blurred Background, Face Tracking, etc.).
+3. Choose how many clips you want (3, 5, 10, 20, or type any number).
+4. Choose clip duration (Automatic, 0-30s, 15-30s, 30s-1m, 1-2m).
+💡 *Tip:* Use `↩️ Back` or `❌ Cancel` at any step to change your options.
+
+───
+
+🌐 *Supported Platforms:*
+• ▶️ YouTube & YouTube Shorts
+• 🟣 Twitch (VODs & Clips)
+• 🟩 Kick (VODs only)
+• 📁 Direct video file upload
+
+───
+
+📦 *What You'll Receive:*
+• Top viral moments cut into 9:16 vertical clips.
+• Bold punch-word title caption on each clip.
+• 🔴🟢🟡 Word-by-word subtitles synced to the speaker's voice.
+• A ready-to-copy YouTube title & hashtags under each video.
+• A full titles summary card at the end for easy copy-pasting.
+• A ZIP file with all clips and titles in one download.
+
+───
+
+🛠️ *Commands:*
+• `/help` — Show this guide
+• `/update` — Check your processing status
+• `/queue` — See how many videos are waiting
+• `/stop` — Cancel your active video
+• `/cancel` — Reset wizard options
+• `/clear` — Clear your waiting queue
+
+───
+
+💡 *Tips:*
+• Processing takes a few minutes — you'll be notified when clips are ready.
+• You can queue multiple links and they'll process one by one automatically.
+• Tap any YouTube title box to copy it instantly on mobile.
+"""
 
     await update.message.reply_text(msg, parse_mode="MarkdownV2")
 
@@ -674,11 +737,8 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
         return
 
     if msg and msg.reply_markup:
-        try:
-            posting_kb = _update_keyboard_posting(msg.reply_markup, platform)
-            await query.edit_message_reply_markup(reply_markup=posting_kb)
-        except Exception as k_exc:
-            logger.warning("Could not update keyboard to posting state: %s", k_exc)
+        posting_kb = _update_keyboard_posting(msg.reply_markup, platform)
+        await _safe_edit_message_reply_markup(query, reply_markup=posting_kb)
 
     video_url = ""
     raw_caption = msg.caption if msg and msg.caption else ""
@@ -789,8 +849,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 "approved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
             _save_approved_users(_approved_users_db)
-            await query.edit_message_text(
-                f"✅ **User Approved!**\n\n`{username}` (`{target_uid}`) has been granted access.",
+            await _safe_edit_message_text(
+                query,
+                text=f"✅ **User Approved!**\n\n`{username}` (`{target_uid}`) has been granted access.",
                 parse_mode="Markdown",
             )
             try:
@@ -802,7 +863,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             except Exception as exc:
                 logger.warning("Could not notify user %d of approval: %s", target_uid, exc)
         else:
-            await query.edit_message_text(f"❌ Access request rejected for User `{target_uid}`.", parse_mode="Markdown")
+            await _safe_edit_message_text(
+                query,
+                text=f"❌ Access request rejected for User `{target_uid}`.",
+                parse_mode="Markdown",
+            )
         return
 
     if data.startswith("done:"):
@@ -828,8 +893,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         if action == "skip":
             await query.answer("👍 Got it — manage clips individually.", show_alert=False)
-            await query.edit_message_text(
-                "⏭️ <b>Skipped auto-schedule.</b>\n\nUse the buttons on each individual clip to post or schedule them manually.",
+            await _safe_edit_message_text(
+                query,
+                text="⏭️ <b>Skipped auto-schedule.</b>\n\nUse the buttons on each individual clip to post or schedule them manually.",
                 parse_mode="HTML",
             )
             _pending_schedule_sessions.pop(chat_id, None)
@@ -846,8 +912,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 return
 
             await query.answer("📅 Scheduling all clips...", show_alert=False)
-            await query.edit_message_text(
-                f"⏳ <b>Scheduling {len(session_clips)} clips to peak slots...</b>",
+            await _safe_edit_message_text(
+                query,
+                text=f"⏳ <b>Scheduling {len(session_clips)} clips to peak slots...</b>",
                 parse_mode="HTML",
             )
 
@@ -894,8 +961,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             scheduler._queue = [item for item in scheduler._queue if item.get("chat_id") != chat_id]
             scheduler._save()
             await query.answer("🗑️ All scheduled posts cancelled.", show_alert=True)
-            await query.edit_message_text(
-                "🗑️ <b>All your scheduled posts have been cancelled.</b>\n\nThe queue is now empty. Use the individual clip buttons to re-schedule.",
+            await _safe_edit_message_text(
+                query,
+                text="🗑️ <b>All your scheduled posts have been cancelled.</b>\n\nThe queue is now empty. Use the individual clip buttons to re-schedule.",
                 parse_mode="HTML",
             )
     if data.startswith("discard:"):
@@ -904,14 +972,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             return
         clip_num = data.split(":")[1] if ":" in data else "?"
         await query.answer(f"🗑️ Clip #{clip_num} Discarded!", show_alert=True)
-        try:
-            await query.edit_message_caption(
-                caption=f"🗑️ <b>Clip #{clip_num} DISCARDED</b>\n\n<i>This clip has been removed from QA review.</i>",
-                parse_mode="HTML",
-                reply_markup=None,
-            )
-        except Exception:
-            pass
+        await _safe_edit_message_caption(
+            query,
+            caption=f"🗑️ <b>Clip #{clip_num} DISCARDED</b>\n\n<i>This clip has been removed from QA review.</i>",
+            parse_mode="HTML",
+            reply_markup=None,
+        )
         return
 
     if data.startswith("sched:"):
@@ -993,17 +1059,20 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     # Handle Wizard Undo / Back / Cancel Navigation
     if data == "wiz:cancel":
         _pending_links.pop(chat_id, None)
-        await query.edit_message_text("❌ Setup cancelled. Send any video link whenever you're ready!")
+        await _safe_edit_message_text(query, text="❌ Setup cancelled. Send any video link whenever you're ready!")
         return
 
     if data == "wiz:back_layout":
         session = _get_or_recover_session(chat_id, update, query, context)
         url = session.get("url", "") if session else ""
         title_label = f"🎬 **Video URL:**\n`{url}`" if url else "🎬 **Video link received!**"
-        await query.edit_message_text(
-            f"{title_label}\n\n"
-            f"🎨 **Choose your Video Canvas Background Style:**\n\n"
-            f"Select a background color or style below, or tap `⚡ Quick Run` for instant Black Canvas:",
+        await _safe_edit_message_text(
+            query,
+            text=(
+                f"{title_label}\n\n"
+                f"🎨 **Choose your Video Canvas Background Style:**\n\n"
+                f"Select a background color or style below, or tap `⚡ Quick Run` for instant Black Canvas:"
+            ),
             reply_markup=_make_layout_keyboard(),
             parse_mode="Markdown",
         )
@@ -1013,9 +1082,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         session = _get_or_recover_session(chat_id, update, query, context)
         layout_mode = session.get("layout_mode", "black_canvas") if session else "black_canvas"
         mode_label = "👤 Face Tracking" if layout_mode == "face_crop" else "🎬 Blurred Background" if layout_mode == "blurred_frame" else "🖤 Black Canvas"
-        await query.edit_message_text(
-            f"✅ **Layout selected:** *{mode_label}*\n\n"
-            f"🏷️ **Does this video have a watermark logo?**",
+        await _safe_edit_message_text(
+            query,
+            text=(
+                f"✅ **Layout selected:** *{mode_label}*\n\n"
+                f"🏷️ **Does this video have a watermark logo?**"
+            ),
             reply_markup=_make_watermark_keyboard(),
             parse_mode="Markdown",
         )
@@ -1025,9 +1097,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         session = _get_or_recover_session(chat_id, update, query, context)
         layout_mode = session.get("layout_mode", "black_canvas") if session else "black_canvas"
         mode_label = "👤 Face Tracking" if layout_mode == "face_crop" else "🎬 Blurred Background" if layout_mode == "blurred_frame" else "🖤 Black Canvas"
-        await query.edit_message_text(
-            f"✅ **Layout selected:** *{mode_label}*\n\n"
-            f"💬 **Include Word-by-Word Subtitles on the clips?**",
+        await _safe_edit_message_text(
+            query,
+            text=(
+                f"✅ **Layout selected:** *{mode_label}*\n\n"
+                f"💬 **Include Word-by-Word Subtitles on the clips?**"
+            ),
             reply_markup=_make_subtitles_keyboard(),
             parse_mode="Markdown",
         )
@@ -1038,10 +1113,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         layout_mode = session.get("layout_mode", "black_canvas") if session else "black_canvas"
         mode_label = "👤 Face Tracking" if layout_mode == "face_crop" else "🎬 Blurred Background" if layout_mode == "blurred_frame" else "🖤 Black Canvas"
         sub_label = "💬 Enabled" if session.get("enable_subtitles", True) else "🚫 Disabled"
-        await query.edit_message_text(
-            f"✅ **Layout:** *{mode_label}* | **Subtitles:** *{sub_label}*\n\n"
-            f"✂️ **How many top clips would you like to generate?**\n\n"
-            f"Select an option below, or reply with any custom number (e.g., 3, 5, 10, 20):",
+        await _safe_edit_message_text(
+            query,
+            text=(
+                f"✅ **Layout:** *{mode_label}* | **Subtitles:** *{sub_label}*\n\n"
+                f"✂️ **How many top clips would you like to generate?**\n\n"
+                f"Select an option below, or reply with any custom number (e.g., 3, 5, 10, 20):"
+            ),
             reply_markup=_make_clips_keyboard(),
             parse_mode="Markdown",
         )
@@ -1051,7 +1129,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     if data == "fmt:quick_run":
         session = _get_or_recover_session(chat_id, update, query, context)
         if not session:
-            await query.edit_message_text("⚠️ Session expired. Please re-send your video URL.")
+            await _safe_edit_message_text(query, text="⚠️ Session expired. Please re-send your video URL.")
             return
         session["layout_mode"] = "black_canvas"
         session["enable_watermark"] = False
@@ -1064,15 +1142,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         layout_mode = data.split("fmt:")[1]
         session = _get_or_recover_session(chat_id, update, query, context)
         if not session:
-            await query.edit_message_text("⚠️ Session expired. Please re-send your video URL.")
+            await _safe_edit_message_text(query, text="⚠️ Session expired. Please re-send your video URL.")
             return
 
         session["layout_mode"] = layout_mode
         mode_label = "👤 Face Tracking" if layout_mode == "face_crop" else "🎬 Blurred Background" if layout_mode == "blurred_frame" else "🖤 Black Canvas"
 
-        await query.edit_message_text(
-            f"✅ **Layout selected:** *{mode_label}*\n\n"
-            f"🏷️ **Does this video have a watermark logo?**",
+        await _safe_edit_message_text(
+            query,
+            text=(
+                f"✅ **Layout selected:** *{mode_label}*\n\n"
+                f"🏷️ **Does this video have a watermark logo?**"
+            ),
             reply_markup=_make_watermark_keyboard(),
             parse_mode="Markdown",
         )
@@ -1083,7 +1164,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         choice = data.split("wm:")[1]
         session = _get_or_recover_session(chat_id, update, query, context)
         if not session:
-            await query.edit_message_text("⚠️ Session expired. Please re-send your video URL.")
+            await _safe_edit_message_text(query, text="⚠️ Session expired. Please re-send your video URL.")
             return
 
         current_layout = session.get("layout_mode", "black_canvas")
@@ -1091,19 +1172,25 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         if choice == "yes":
             session["awaiting_wm"] = True
-            await query.edit_message_text(
-                f"✅ **Layout selected:** *{mode_label}*\n\n"
-                f"📸 **Send your PNG Watermark Logo Image now!**\n\n"
-                f"Attach or drag & drop your transparent `.png` logo image in Telegram chat.",
+            await _safe_edit_message_text(
+                query,
+                text=(
+                    f"✅ **Layout selected:** *{mode_label}*\n\n"
+                    f"📸 **Send your PNG Watermark Logo Image now!**\n\n"
+                    f"Attach or drag & drop your transparent `.png` logo image in Telegram chat."
+                ),
                 parse_mode="Markdown",
             )
             return
         else:
             session["enable_watermark"] = False
             session["wm_name"] = "None"
-            await query.edit_message_text(
-                f"✅ **Layout selected:** *{mode_label}*\n\n"
-                f"💬 **Include Word-by-Word Subtitles on the clips?**",
+            await _safe_edit_message_text(
+                query,
+                text=(
+                    f"✅ **Layout selected:** *{mode_label}*\n\n"
+                    f"💬 **Include Word-by-Word Subtitles on the clips?**"
+                ),
                 reply_markup=_make_subtitles_keyboard(),
                 parse_mode="Markdown",
             )
@@ -1114,7 +1201,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         choice = data.split("sub:")[1]
         session = _get_or_recover_session(chat_id, update, query, context)
         if not session:
-            await query.edit_message_text("⚠️ Session expired. Please re-send your video URL.")
+            await _safe_edit_message_text(query, text="⚠️ Session expired. Please re-send your video URL.")
             return
 
         session["enable_subtitles"] = (choice == "yes")
@@ -1124,10 +1211,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         mode_label = "👤 Face Tracking" if current_layout == "face_crop" else "🎬 Blurred Background" if current_layout == "blurred_frame" else "🖤 Black Canvas"
         sub_label = "💬 Enabled" if session["enable_subtitles"] else "🚫 Disabled"
 
-        await query.edit_message_text(
-            f"✅ **Layout:** *{mode_label}* | **Subtitles:** *{sub_label}*\n\n"
-            f"✂️ **How many top clips would you like to generate?**\n\n"
-            f"Select an option below, or reply with any custom number (e.g., 3, 5, 10, 20):",
+        await _safe_edit_message_text(
+            query,
+            text=(
+                f"✅ **Layout:** *{mode_label}* | **Subtitles:** *{sub_label}*\n\n"
+                f"✂️ **How many top clips would you like to generate?**\n\n"
+                f"Select an option below, or reply with any custom number (e.g., 3, 5, 10, 20):"
+            ),
             reply_markup=_make_clips_keyboard(),
             parse_mode="Markdown",
         )
@@ -1142,7 +1232,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         session = _get_or_recover_session(chat_id, update, query, context)
         if not session:
-            await query.edit_message_text("⚠️ Session expired. Please re-send your video URL.")
+            await _safe_edit_message_text(query, text="⚠️ Session expired. Please re-send your video URL.")
             return
 
         session["num_clips"] = num_clips
@@ -1150,10 +1240,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         mode_label = "👤 Face Tracking" if current_layout == "face_crop" else "🎬 Blurred Background" if current_layout == "blurred_frame" else "🖤 Black Canvas"
         sub_label = "💬 Enabled" if session.get("enable_subtitles", True) else "🚫 Disabled"
 
-        await query.edit_message_text(
-            f"✅ **Layout:** *{mode_label}* | **Subtitles:** *{sub_label}* | **Clips:** *{num_clips}*\n\n"
-            f"⏱️ **How long should each clip be?**\n\n"
-            f"Select a target duration below, or tap `⚡ Automatic` for AI-optimized story length:",
+        await _safe_edit_message_text(
+            query,
+            text=(
+                f"✅ **Layout:** *{mode_label}* | **Subtitles:** *{sub_label}* | **Clips:** *{num_clips}*\n\n"
+                f"⏱️ **How long should each clip be?**\n\n"
+                f"Select a target duration below, or tap `⚡ Automatic` for AI-optimized story length:"
+            ),
             reply_markup=_make_duration_keyboard(),
             parse_mode="Markdown",
         )
@@ -1164,7 +1257,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         target_duration = data.split("dur:")[1]
         session = _get_or_recover_session(chat_id, update, query, context)
         if not session:
-            await query.edit_message_text("⚠️ Session expired. Please re-send your video URL.")
+            await _safe_edit_message_text(query, text="⚠️ Session expired. Please re-send your video URL.")
             return
 
 

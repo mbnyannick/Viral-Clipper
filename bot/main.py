@@ -139,7 +139,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
 
     logger.info("Polling started — waiting for messages")
-    app.run_polling(drop_pending_updates=False)
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":

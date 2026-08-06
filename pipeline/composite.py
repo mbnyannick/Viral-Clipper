@@ -12,6 +12,7 @@ Supports two layout modes:
 
 import asyncio
 import logging
+import shutil
 import subprocess
 import typing
 from pathlib import Path
@@ -282,17 +283,13 @@ async def _composite_one(
             "  Compositing clip %02d (face_crop clean full screen, wm_y=%d)",
             moment.index, wm_y,
         )
-        sub_stage = "[out2]null[out]"
-
-        if vo_dur > 0:
-            concat_v = (
-                f"[0:v]{crop_filter},{COLOR_ENHANCE},split=2[vt_in][vm_in];"
-                f"[vt_in]trim=end={vo_dur:.2f},setpts=PTS-STARTPTS[v_teaser];"
-                f"[vm_in]setpts=PTS-STARTPTS[v_main];"
-                f"[v_teaser][v_main]concat=n=2:v=1:a=0[vbase];"
-            )
+        if enable_subtitles and sub_file and Path(sub_file).exists():
+            safe_sub = str(sub_file).replace(":", "\\:").replace("'", "\\'")
+            sub_stage = f"[out2]subtitles='{safe_sub}'[out]"
         else:
-            concat_v = f"[0:v]{crop_filter},{COLOR_ENHANCE},setpts=PTS-STARTPTS[vbase];"
+            sub_stage = "[out2]null[out]"
+
+        concat_v = f"[0:v]{crop_filter},{COLOR_ENHANCE},setpts=PTS-STARTPTS[vbase];"
 
         vf = (
             f"{concat_v}"
@@ -305,24 +302,18 @@ async def _composite_one(
             "  Compositing clip %02d (%s 720x1280, crop=%s, wm_y=%d)",
             moment.index, layout_mode, "1:1" if is_square else "4:3", wm_y,
         )
-        sub_stage = "[out2]null[out]"
+        if enable_subtitles and sub_file and Path(sub_file).exists():
+            safe_sub = str(sub_file).replace(":", "\\:").replace("'", "\\'")
+            sub_stage = f"[out2]subtitles='{safe_sub}'[out]"
+        else:
+            sub_stage = "[out2]null[out]"
 
         # Silky smooth HD background blur + Lanczos sharp main video scaling
-        if vo_dur > 0:
-            concat_v = (
-                f"[0:v]scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,crop={CANVAS_W}:{CANVAS_H},boxblur=25:3[bg];"
-                f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=lanczos,{COLOR_ENHANCE}[fg];"
-                f"[bg][fg]overlay=0:{video_top_y},split=2[vt_in][vm_in];"
-                f"[vt_in]trim=end={vo_dur:.2f},setpts=PTS-STARTPTS[v_teaser];"
-                f"[vm_in]setpts=PTS-STARTPTS[v_main];"
-                f"[v_teaser][v_main]concat=n=2:v=1:a=0[vbase];"
-            )
-        else:
-            concat_v = (
-                f"[0:v]scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,crop={CANVAS_W}:{CANVAS_H},boxblur=25:3[bg];"
-                f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=lanczos,{COLOR_ENHANCE}[fg];"
-                f"[bg][fg]overlay=0:{video_top_y},setpts=PTS-STARTPTS[vbase];"
-            )
+        concat_v = (
+            f"[0:v]scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,crop={CANVAS_W}:{CANVAS_H},boxblur=25:3[bg];"
+            f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=lanczos,{COLOR_ENHANCE}[fg];"
+            f"[bg][fg]overlay=0:{video_top_y},setpts=PTS-STARTPTS[vbase];"
+        )
 
         vf = (
             f"{concat_v}"
@@ -344,17 +335,13 @@ async def _composite_one(
             bg_color = "#1a1a1a"
 
         bg_color_pad = bg_color.replace("#", "0x")
-        sub_stage = "[out2]null[out]"
-
-        if vo_dur > 0:
-            concat_v = (
-                f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h},{COLOR_ENHANCE},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},split=2[vt_in][vm_in];"
-                f"[vt_in]trim=end={vo_dur:.2f},setpts=PTS-STARTPTS[v_teaser];"
-                f"[vm_in]setpts=PTS-STARTPTS[v_main];"
-                f"[v_teaser][v_main]concat=n=2:v=1:a=0[vbase];"
-            )
+        if enable_subtitles and sub_file and Path(sub_file).exists():
+            safe_sub = str(sub_file).replace(":", "\\:").replace("'", "\\'")
+            sub_stage = f"[out2]subtitles='{safe_sub}'[out]"
         else:
-            concat_v = f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h},{COLOR_ENHANCE},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},setpts=PTS-STARTPTS[vbase];"
+            sub_stage = "[out2]null[out]"
+
+        concat_v = f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h},{COLOR_ENHANCE},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},setpts=PTS-STARTPTS[vbase];"
 
         vf = (
             f"{concat_v}"
@@ -404,28 +391,22 @@ async def _composite_one(
         a_idx += 1
 
 
-    # Mute/delay original clip audio during Voiceover lead-in (resampled to 48kHz stereo)
-    if vo_dur > 0:
-        delay_ms = int(vo_dur * 1000)
-        audio_mix_filters = [f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.3,adelay=delays={delay_ms}|{delay_ms}[orig_a]"]
-    else:
-        audio_mix_filters = ["[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.3[orig_a]"]
-
+    # Standard 48kHz stereo clip audio mix with voiceover, BGM & SFX
+    audio_mix_filters = ["[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0[orig_a]"]
     mix_inputs = ["[orig_a]"]
 
     if vo_input_idx is not None:
-        audio_mix_filters.append(f"[{vo_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.2[vo_a]")
+        audio_mix_filters.append(f"[{vo_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.4[vo_a]")
         mix_inputs.append("[vo_a]")
 
     if bgm_input_idx is not None:
-        audio_mix_filters.append(f"[{bgm_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0,aloop=loop=-1:size=2e+09[bgm_a]")
+        audio_mix_filters.append(f"[{bgm_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.25,aloop=loop=-1:size=2e+09[bgm_a]")
         mix_inputs.append("[bgm_a]")
 
     if sfx_input_idx is not None:
-        # Detect exact millisecond of physical action peak
         sfx_peak_sec = _detect_action_motion_peak(clip_path)
-        sfx_delay_ms = int((sfx_peak_sec + vo_dur) * 1000)
-        audio_mix_filters.append(f"[{sfx_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0,adelay=delays={sfx_delay_ms}|{sfx_delay_ms}[sfx_a]")
+        sfx_delay_ms = int(sfx_peak_sec * 1000)
+        audio_mix_filters.append(f"[{sfx_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.6,adelay=delays={sfx_delay_ms}|{sfx_delay_ms}[sfx_a]")
         mix_inputs.append("[sfx_a]")
 
     if len(mix_inputs) > 1:
