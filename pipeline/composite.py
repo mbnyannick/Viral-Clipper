@@ -24,12 +24,60 @@ from .subtitle import build_word_subtitle_filter, build_aura_keyword_filter
 
 logger = logging.getLogger(__name__)
 
+import cv2
+
 CANVAS_W = 2160
 CANVAS_H = 3840
 GAP_PX = 72
 CAPTION_OVERLAP = 120   # px the caption overlaps INTO the top of the video frame @ 4K
 
 _COMPOSITE_CONCURRENCY = 2
+
+
+def _detect_action_motion_peak(clip_path: Path) -> float:
+    """
+    Scan clip frames with OpenCV to find the exact millisecond where physical motion peaks
+    (e.g. sudden double-take, laugh, slap, reaction gesture, jump).
+    Returns relative timestamp in seconds from start of clip.
+    """
+    if not clip_path.exists():
+        return 1.5
+
+    cap = cv2.VideoCapture(str(clip_path))
+    if not cap.isOpened():
+        return 1.5
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if total_frames < 10:
+        cap.release()
+        return 1.5
+
+    max_diff = -1.0
+    best_frame_idx = int(fps * 1.5)
+    prev_gray = None
+
+    # Step through frames at ~10 FPS for high performance
+    step = max(1, int(fps / 10.0))
+    for f_idx in range(0, total_frames, step):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            continue
+
+        small = cv2.resize(frame, (320, 180))
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        if prev_gray is not None:
+            diff = float(cv2.absdiff(gray, prev_gray).mean())
+            if diff > max_diff:
+                max_diff = diff
+                best_frame_idx = f_idx
+        prev_gray = gray
+
+    cap.release()
+    peak_sec = round(best_frame_idx / fps, 2)
+    logger.info("  Action motion peak detected in %s @ %.2fs (diff=%.1f)", clip_path.name, peak_sec, max_diff)
+    return peak_sec
 
 
 async def _probe_video_position(clip_path: Path, apply_4_3_crop: bool = False) -> tuple[int, int]:
@@ -428,7 +476,10 @@ async def _composite_one(
         mix_inputs.append("[bgm_a]")
 
     if sfx_input_idx is not None:
-        audio_mix_filters.append(f"[{sfx_input_idx}:a]volume=1.2[sfx_a]")
+        # Detect exact millisecond of physical action peak
+        sfx_peak_sec = _detect_action_motion_peak(clip_path)
+        sfx_delay_ms = int((sfx_peak_sec + vo_dur) * 1000)
+        audio_mix_filters.append(f"[{sfx_input_idx}:a]volume=1.2,adelay=delays={sfx_delay_ms}|{sfx_delay_ms}[sfx_a]")
         mix_inputs.append("[sfx_a]")
 
     if len(mix_inputs) > 1:
