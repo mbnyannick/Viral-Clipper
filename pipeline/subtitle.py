@@ -267,7 +267,7 @@ def build_word_subtitle_filter(
     subs.info["WrapStyle"] = "2"  # Strict single horizontal line
 
     margin_v = int(canvas_h * 0.18)  # Lower safe zone below speaker chin/chest
-    font_size = max(52, int(canvas_w * 0.072))
+    font_size = max(38, int(canvas_w * 0.052))  # Sleek single-line font size (no multi-line wrapping)
     style = pysubs2.SSAStyle(
         fontname="Bebas Neue",
         fontsize=font_size,
