@@ -472,7 +472,7 @@ async def _composite_one(
         mix_inputs.append("[vo_a]")
 
     if bgm_input_idx is not None:
-        audio_mix_filters.append(f"[{bgm_input_idx}:a]volume=0.20,aloop=loop=-1:size=2e+09[bgm_a]")  # Subtle background beat
+        audio_mix_filters.append(f"[{bgm_input_idx}:a]volume=0.15,aloop=loop=-1:size=2e+09[bgm_a]")  # Smooth 15% background music bed
         mix_inputs.append("[bgm_a]")
 
     if sfx_input_idx is not None:
