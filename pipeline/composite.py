@@ -200,6 +200,7 @@ async def _composite_one(
     norm_wm_path = output_dir / f"wm_norm_{moment.index:02d}.png"
     _, wm_w, wm_h = prepare_watermark(watermark_path, norm_wm_path)
 
+    is_square = layout_mode != "face_crop"
     if layout_mode == "face_crop":
         video_top_y = 0
         scaled_h = CANVAS_H
