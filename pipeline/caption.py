@@ -113,7 +113,7 @@ def _get_emoji_image(emoji_char: str, size: int, assets_dir: Path) -> Image.Imag
         return None
 
     try:
-        f = ImageFont.truetype(emoji_font_path, 120, index=0)
+        f = ImageFont.truetype(emoji_font_path, 109, index=0)
         temp_img = Image.new("RGBA", (240, 240), (0, 0, 0, 0))
         d = ImageDraw.Draw(temp_img)
         d.text((10, 10), emoji_char, font=f, embedded_color=True)
@@ -143,31 +143,63 @@ def _build_tokens(line_text: str, normal_f: ImageFont.FreeTypeFont, bold_f: Imag
     return tokens
 
 
+def _extract_emojis(text: str) -> tuple[str, list[str]]:
+    plain = []
+    emojis = []
+    for c in text:
+        if ord(c) > 255 and not c.isalnum():
+            emojis.append(c)
+        else:
+            plain.append(c)
+    return "".join(plain).strip(), emojis
+
+
 def _draw_white_card(img: Image.Image, lines: list[str], emoji_str: str | None, assets_dir: Path, layout_mode: str = "blurred_frame") -> None:
     bold_path, normal_path, _ = _load_font_paths(assets_dir)
     normal_f = ImageFont.truetype(normal_path, SECONDARY_FONT_SIZE)
     bold_f = ImageFont.truetype(bold_path, SECONDARY_FONT_SIZE)
     headline_f = ImageFont.truetype(bold_path, MAIN_FONT_SIZE)
 
-    lines = [ln for ln in lines if ln.strip()][:MAX_LINES]
-    if len(lines) == 3:
-        lines = [lines[0], f"{lines[1]} {lines[2]}".strip()]
+    plain_lines = []
+    emojis_to_append = []
+    for ln in lines:
+        p, ems = _extract_emojis(ln)
+        if p:
+            plain_lines.append(p)
+        emojis_to_append.extend(ems)
+    if emoji_str:
+        _, ems = _extract_emojis(emoji_str)
+        emojis_to_append.extend(ems)
 
-    if emoji_str and lines:
-        lines[-1] = f"{lines[-1].strip()} {emoji_str.strip()}"
+    plain_lines = [ln for ln in plain_lines if ln.strip()][:MAX_LINES]
+    if len(plain_lines) == 3:
+        plain_lines = [plain_lines[0], f"{plain_lines[1]} {plain_lines[2]}".strip()]
 
-    rows: list[tuple[list[tuple[str, ImageFont.FreeTypeFont]], ImageFont.FreeTypeFont]] = []
+    rows: list[tuple[list[tuple[str, ImageFont.FreeTypeFont | None, bool]], ImageFont.FreeTypeFont]] = []
     max_line_width = 0
     total_text_height = 0
 
-    for idx, line in enumerate(lines):
+    for idx, line in enumerate(plain_lines):
         font = headline_f if idx == 0 else normal_f
         wrapped = _wrap_text(line, font, CANVAS_W - BOX_PAD_X * 2)
-        for subline in wrapped:
-            tokens = _build_tokens(subline, normal_f, bold_f)
+        for subline_idx, subline in enumerate(wrapped):
+            tokens = [(t, f, False) for t, f in _build_tokens(subline, normal_f, bold_f)]
             if not tokens:
                 continue
-            line_width = sum(_measure_text_width(text, f) for text, f in tokens) + WORD_SPACING * max(0, len(tokens) - 1)
+
+            if idx == len(plain_lines) - 1 and subline_idx == len(wrapped) - 1:
+                for em in emojis_to_append:
+                    tokens.append((em, None, True))
+
+            line_width = 0
+            for tok_text, f, is_em in tokens:
+                if is_em:
+                    em_img = _get_emoji_image(tok_text, EMOJI_SIZE, assets_dir)
+                    line_width += (em_img.width if em_img else EMOJI_SIZE) + WORD_SPACING
+                else:
+                    line_width += _measure_text_width(tok_text, f) + WORD_SPACING
+            line_width = max(0, line_width - WORD_SPACING)
+
             max_line_width = max(max_line_width, line_width)
             rows.append((tokens, font))
             total_text_height += font.getbbox("Ay")[3] - font.getbbox("Ay")[1]
@@ -206,12 +238,29 @@ def _draw_white_card(img: Image.Image, lines: list[str], emoji_str: str | None, 
     draw = ImageDraw.Draw(img)
     y = box_y + BOX_PAD_Y
     for tokens, font in rows:
-        row_width = sum(_measure_text_width(text, f) for text, f in tokens) + WORD_SPACING * max(0, len(tokens) - 1)
-        x = (CANVAS_W - row_width) // 2
         line_height = font.getbbox("Ay")[3] - font.getbbox("Ay")[1]
-        for text, font_obj in tokens:
-            draw.text((x, y), text, font=font_obj, fill=TEXT_COLOR)
-            x += _measure_text_width(text, font_obj) + WORD_SPACING
+        row_width = 0
+        for tok_text, f, is_em in tokens:
+            if is_em:
+                em_img = _get_emoji_image(tok_text, EMOJI_SIZE, assets_dir)
+                row_width += (em_img.width if em_img else EMOJI_SIZE) + WORD_SPACING
+            else:
+                row_width += _measure_text_width(tok_text, f) + WORD_SPACING
+        row_width = max(0, row_width - WORD_SPACING)
+
+        x = (CANVAS_W - row_width) // 2
+        for tok_text, font_obj, is_em in tokens:
+            if is_em:
+                em_img = _get_emoji_image(tok_text, EMOJI_SIZE, assets_dir)
+                if em_img:
+                    ey = y + (line_height - em_img.height) // 2
+                    img.alpha_composite(em_img, (x, ey))
+                    x += em_img.width + WORD_SPACING
+                else:
+                    x += EMOJI_SIZE + WORD_SPACING
+            else:
+                draw.text((x, y), tok_text, font=font_obj, fill=TEXT_COLOR)
+                x += _measure_text_width(tok_text, font_obj) + WORD_SPACING
         y += line_height + LINE_GAP
 
 
