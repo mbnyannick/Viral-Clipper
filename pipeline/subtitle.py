@@ -158,7 +158,7 @@ def build_word_subtitle_filter(
             raw_w = mask_profanity(_clean_word_text(w["word"]))
             if raw_w:
                 words.append({
-                    "word": _escape_ffmpeg_text(raw_w.capitalize()),
+                    "word": _escape_ffmpeg_text(raw_w.upper()),
                     "start": rel_start,
                     "end": rel_end,
                 })
@@ -183,7 +183,7 @@ def build_word_subtitle_filter(
                 clean_w = mask_profanity(_clean_word_text(rw))
                 if clean_w:
                     words.append({
-                        "word": _escape_ffmpeg_text(clean_w.capitalize()),
+                        "word": _escape_ffmpeg_text(clean_w.upper()),
                         "start": rel_start,
                         "end": rel_end,
                     })
@@ -192,21 +192,16 @@ def build_word_subtitle_filter(
         logger.info("  No word timestamps for clip [%.1f-%.1f] — skipping subtitles", clip_start, clip_end)
         return None, None
 
-    # Group words into clean 1 to 2-word phrases (Strict Single Horizontal Line — Never Stacked!)
+    # Group words into snappy 1 to 3-word phrases (Kai Cenat short-form subtitle pacing)
     phrases = []
     current_phrase = []
-    for w in words:
+    for idx, w in enumerate(words):
         current_phrase.append(w)
-        if len(current_phrase) >= 2:
+        is_last = (idx == len(words) - 1)
+        next_pause = False if is_last else (words[idx + 1]["start"] - w["end"] > 0.25)
+        if len(current_phrase) >= 3 or next_pause or is_last:
             phrases.append(current_phrase)
             current_phrase = []
-        elif w != words[-1]:
-            next_w = words[words.index(w) + 1]
-            if next_w["start"] - w["end"] > 0.25:
-                phrases.append(current_phrase)
-                current_phrase = []
-    if current_phrase:
-        phrases.append(current_phrase)
 
     def _format_ass_time(sec: float) -> str:
         h = int(sec // 3600)
@@ -218,18 +213,14 @@ def build_word_subtitle_filter(
             cs = 0
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
-    # Lower 20% vertical position (below speaker chin/chest, clean safe zone)
-    margin_v = int(canvas_h * 0.20)
-    font_size = max(46, int(canvas_w * 0.064))  # Crisp single-line font size
-
     import pysubs2
 
     subs = pysubs2.SSAFile()
     subs.info["PlayResX"] = str(canvas_w)
     subs.info["PlayResY"] = str(canvas_h)
-    subs.info["WrapStyle"] = "2"  # Strict single horizontal line (no multi-line stacking!)
+    subs.info["WrapStyle"] = "2"  # Strict single horizontal line
 
-    # Exact KaiStyle specification: Bebas Neue, Primary White (&H00FFFFFF), Secondary Yellow (&H0000FFFF), 4px Black Outline, 0 Shadow
+    # Exact KaiStyle specification: Bebas Neue, Primary White (&H00FFFFFF), Secondary Yellow (&H0000FFFF), 4px Black Outline, 0 Shadow, Alignment=5
     font_size = max(52, int(canvas_w * 0.072))
     style = pysubs2.SSAStyle(
         fontname="Bebas Neue",
@@ -238,10 +229,10 @@ def build_word_subtitle_filter(
         secondarycolor=pysubs2.Color(255, 255, 0),    # &H0000FFFF (Vibrant Yellow for \kf active tracking)
         outlinecolor=pysubs2.Color(0, 0, 0),          # &H00000000 (Pure Black)
         backcolor=pysubs2.Color(0, 0, 0, 0),          # &H00000000 (Transparent)
-        bold=True,                                     # Bold
-        italic=False,
-        underline=False,
-        strikeout=False,
+        bold=True,                                     # -1
+        italic=False,                                  # 0
+        underline=False,                               # 0
+        strikeout=False,                               # 0
         scalex=100.0,
         scaley=100.0,
         spacing=0.0,
@@ -249,10 +240,10 @@ def build_word_subtitle_filter(
         borderstyle=1,                                 # Outline + Shadow
         outline=4.0,                                   # 4px Outline
         shadow=0.0,                                    # 0 Shadow
-        alignment=2,                                  # Bottom-Center alignment
+        alignment=5,                                  # Alignment 5 (Center)
         marginl=10,
         marginr=10,
-        marginv=margin_v,
+        marginv=10,
     )
     subs.styles["KaiStyle"] = style
 
