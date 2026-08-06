@@ -260,8 +260,7 @@ async def _get_hls_url(url: str) -> str:
         return hls_url
 
     is_youtube = "youtu" in u_lower
-    is_kick = "kick.com" in u_lower
-    impersonate_opts = ["--impersonate", "chrome"] if is_kick else []
+    impersonate_opts = []
     cookie_opts = _get_cookie_opts()
     yt_client_chains = YT_CLIENT_CHAINS if is_youtube else [[]]
 
@@ -522,58 +521,14 @@ async def _scan_and_score_window(
 
     tracker.scanned += 1  # 📡 Scanned counter
 
-    # ── 2. Deepgram Transcription ──────────────────────────────────────────────────
-    deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
-    if not deepgram_api_key:
-        logger.warning("%s — DEEPGRAM_API_KEY missing. Skipping.", label)
-        tracker.analyzed += 1
-        return {"window_dir": window_dir, "segments": [], "moments": []}
-
-    url = "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&utterances=true&detect_language=true"
-    headers = {"Authorization": f"Token {deepgram_api_key}"}
-    data = None
-
+    # ── 2. Dual-Engine Transcription (Deepgram Nova-2 + Groq Whisper Fallback) ──────
     try:
-        import httpx
-        async with httpx.AsyncClient() as client:
-            for attempt in range(1, 4):
-                try:
-                    with open(audio_path, "rb") as fh:
-                        audio_data = fh.read()
-                    response = await client.post(url, headers=headers, content=audio_data, timeout=120.0)
-                    response.raise_for_status()
-                    data = response.json()
-                    break
-                except Exception as exc:
-                    logger.warning("%s — Deepgram attempt %d/3 failed: %s", label, attempt, exc)
-                    if attempt < 3:
-                        await asyncio.sleep(attempt * 1.5)
+        from pipeline.transcribe import transcribe_chunks
+        segments = await transcribe_chunks([(audio_path, window_start)])
     except Exception as exc:
-        logger.warning("%s — Deepgram transcription failed: %s", label, exc)
+        logger.warning("%s — Transcription failed: %s", label, exc)
         tracker.analyzed += 1
         return {"window_dir": window_dir, "segments": [], "moments": []}
-
-    raw_utterances = (data or {}).get("results", {}).get("utterances", [])
-    segments = []
-    for utt in raw_utterances:
-        utt_start = utt.get("start", 0.0)
-        utt_end = utt.get("end", 0.0)
-        utt_text = utt.get("transcript", "")
-        utt_words = [
-            {
-                "word": w.get("word", "").strip(),
-                "start": round(w.get("start", 0.0) + window_start, 3),
-                "end": round(w.get("end", 0.0) + window_start, 3),
-            }
-            for w in utt.get("words", [])
-            if w.get("word", "").strip()
-        ]
-        segments.append({
-            "text": utt_text.strip(),
-            "start": round(utt_start + window_start, 3),
-            "end": round(utt_end + window_start, 3),
-            "words": utt_words,
-        })
 
     if not segments:
         logger.info("%s — quiet window.", label)
