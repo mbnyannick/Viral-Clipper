@@ -26,10 +26,10 @@ logger = logging.getLogger(__name__)
 
 import cv2
 
-CANVAS_W = 2160
-CANVAS_H = 3840
-GAP_PX = 72
-CAPTION_OVERLAP = 120   # px the caption overlaps INTO the top of the video frame @ 4K
+CANVAS_W = 1080
+CANVAS_H = 1920
+GAP_PX = 36
+CAPTION_OVERLAP = 60   # px the caption overlaps INTO the top of the video frame @ 1080p
 
 _COMPOSITE_CONCURRENCY = 2
 
@@ -560,13 +560,13 @@ _COMPOSITE_SEMAPHORE = asyncio.Semaphore(2)
 
 def _get_v_encoder_args() -> list[str]:
     if sys.platform == "darwin":
-        return ["-c:v", "h264_videotoolbox", "-b:v", "25000k"]
+        return ["-c:v", "h264_videotoolbox", "-b:v", "12000k"]
     return [
         "-c:v", "libx264",
         "-preset", "fast",
-        "-crf", "16",
-        "-maxrate", "25000k",
-        "-bufsize", "50000k",
+        "-crf", "18",
+        "-maxrate", "12000k",
+        "-bufsize", "24000k",
         "-threads", "4",
     ]
 

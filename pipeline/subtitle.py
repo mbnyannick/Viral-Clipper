@@ -135,10 +135,10 @@ def build_word_subtitle_filter(
     segments: list[dict],
     clip_start: float,
     clip_end: float,
-    canvas_w: int = 2160,
+    canvas_w: int = 1080,
     wm_y: int | None = None,
     font_path: str | None = None,
-    canvas_h: int = 3840,
+    canvas_h: int = 1920,
     time_offset: float = 0.0,
 ) -> tuple[str | None, str | None]:
     """
@@ -306,8 +306,8 @@ def build_word_subtitle_filter(
 def build_aura_keyword_filter(
     aura_word: str,
     moment_duration: float,
-    canvas_w: int = 2160,
-    canvas_h: int = 3840,
+    canvas_w: int = 1080,
+    canvas_h: int = 1920,
     font_path: str | None = None,
     appear_at: float = 1.5,
     hold_duration: float = 1.8,

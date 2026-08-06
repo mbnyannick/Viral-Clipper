@@ -16,8 +16,8 @@ from .score import Moment
 
 logger = logging.getLogger(__name__)
 
-THUMB_W = 2160
-THUMB_H = 3840
+THUMB_W = 1080
+THUMB_H = 1920
 
 
 async def generate_cover_thumbnail(

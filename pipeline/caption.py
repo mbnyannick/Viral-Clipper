@@ -23,29 +23,29 @@ from .subtitle import mask_profanity
 
 logger = logging.getLogger(__name__)
 
-# ── 4K Ultra HD Canvas (2160×3840) ──────────────────────────────────────────────
-CANVAS_W: int = 2160
-CANVAS_H: int = 3840
+# ── 1080p Full HD Canvas (1080×1920) ───────────────────────────────────────────
+CANVAS_W: int = 1080
+CANVAS_H: int = 1920
 
-# 4:3 video zone on 2160×3840 (video = 2160×1620, centered)
-_VIDEO_TOP_Y: int = (CANVAS_H - CANVAS_W * 3 // 4) // 2   # = 1110
-_VIDEO_BOT_Y: int = _VIDEO_TOP_Y + CANVAS_W * 3 // 4       # = 2730
+# 4:3 video zone on 1080×1920 (video = 1080×810, centered)
+_VIDEO_TOP_Y: int = (CANVAS_H - CANVAS_W * 3 // 4) // 2   # = 555
+_VIDEO_BOT_Y: int = _VIDEO_TOP_Y + CANVAS_W * 3 // 4       # = 1365
 
-# ── Typography & 4K Scaling ───────────────────────────────────────────────────
-FONT_SIZE: int   = 102       # Crisp readable 4K size for top blur bar
-LINE_GAP: int    = 24
-WORD_GAP: int    = 21
+# ── Typography & 1080p Scaling ────────────────────────────────────────────────
+FONT_SIZE: int   = 51        # Crisp readable 1080p size for top blur bar
+LINE_GAP: int    = 12
+WORD_GAP: int    = 10
 
-# ── Box style (4K Ultra HD rounded white card) ──────────────────────────────
+# ── Box style (1080p Full HD rounded white card) ─────────────────────────────
 BOX_BG       = (255, 255, 255, 255)  # crisp pure white
-BOX_RADIUS   = 48                    # smooth 48px rounded corners @ 4K
-BOX_PAD_X    = 72                    # spacious side padding @ 4K
-BOX_PAD_Y    = 42                    # top/bottom padding @ 4K
+BOX_RADIUS   = 24                    # smooth 24px rounded corners @ 1080p
+BOX_PAD_X    = 36                    # spacious side padding @ 1080p
+BOX_PAD_Y    = 21                    # top/bottom padding @ 1080p
 TEXT_COLOR   = (15, 15, 15)          # bold dark text
 
 # ── Box center positions ──────────────────────────────────────────────────────
-_BOX_CENTER_PILLARBOX: int = 900
-_BOX_CENTER_FACECROP: int  = 420
+_BOX_CENTER_PILLARBOX: int = 450
+_BOX_CENTER_FACECROP: int  = 210
 
 _SYSTEM_EMOJI_PATHS = [
     "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
@@ -185,7 +185,7 @@ def _draw_white_card(
     box_inner_w = max_row_w
     box_inner_h = FONT_SIZE * n_lines + LINE_GAP * max(0, n_lines - 1)
 
-    box_w = max(1380, min(CANVAS_W - 240, box_inner_w + BOX_PAD_X * 2))
+    box_w = max(690, min(CANVAS_W - 120, box_inner_w + BOX_PAD_X * 2))
     box_inner_w = box_w - BOX_PAD_X * 2
     box_h = box_inner_h + BOX_PAD_Y * 2
 
