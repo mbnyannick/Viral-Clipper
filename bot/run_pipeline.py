@@ -440,7 +440,7 @@ async def run_pipeline(
             else:
                 logger.warning("  [QA GATE RETRY] Clip #%02d failed 9:16 vertical verification — force re-compositing...", m.index)
                 try:
-                    re_clip = await composite_clips([p], [captions[m.index-1]], watermark_path, [m], finals_dir, layout_mode=layout_mode, enable_subtitles=enable_subtitles, segments=segments)
+                    re_clip = await composite_clips([clips[m.index]], [captions[m.index]], watermark_path, [m], finals_dir, layout_mode=layout_mode, enable_silence_cut=enable_silence_cut, enable_subtitles=enable_subtitles, segments=segments)
                     verified_clips.extend(re_clip)
                 except Exception as qa_exc:
                     logger.error("QA Gate retry error for clip #%02d: %s", m.index, qa_exc)

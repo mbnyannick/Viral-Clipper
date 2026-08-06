@@ -195,7 +195,12 @@ async def _composite_one(
     enable_subtitles: bool = True,
     segments: list[dict] | None = None,
 ) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"final_{moment.index:02d}.mp4"
+
+    # Safety guard: Ensure input clip_path and output out_path are never identical files
+    if clip_path.resolve() == out_path.resolve():
+        out_path = output_dir / f"rendered_{moment.index:02d}.mp4"
     norm_wm_path = output_dir / f"wm_norm_{moment.index:02d}.png"
     _, wm_w, wm_h = prepare_watermark(watermark_path, norm_wm_path)
 
