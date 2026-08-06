@@ -163,11 +163,11 @@ async def transcribe_chunks(
     """
     Transcribe all chunks concurrently using Deepgram or Groq Whisper API with auto-fallback.
     """
-    deepgram_key = api_key or os.getenv("DEEPGRAM_API_KEY")
-    groq_key = os.getenv("GROQ_API_KEY")
+    deepgram_key = os.getenv("DEEPGRAM_API_KEY", "").strip()
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
 
-    # Primary try: Deepgram if key is available and not starting with gsk_
-    if deepgram_key and not deepgram_key.startswith("gsk_"):
+    # Primary try: Deepgram ONLY if valid Deepgram key is configured
+    if deepgram_key and (deepgram_key.startswith("dg_") or "deepgram" in deepgram_key.lower()):
         try:
             logger.info("Submitting %d chunks to Deepgram Nova-2 concurrently", len(chunks))
             sem = asyncio.Semaphore(20)
