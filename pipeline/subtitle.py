@@ -248,16 +248,8 @@ def build_word_subtitle_filter(
         dedup_words.append(w)
     words = dedup_words
 
-    # Group words into snappy 1 to 3-word phrases (Kai Cenat short-form subtitle pacing)
-    phrases = []
-    current_phrase = []
-    for idx, w in enumerate(words):
-        current_phrase.append(w)
-        is_last = (idx == len(words) - 1)
-        next_pause = False if is_last else (words[idx + 1]["start"] - w["end"] > 0.25)
-        if len(current_phrase) >= 3 or next_pause or is_last:
-            phrases.append(current_phrase)
-            current_phrase = []
+    # Group words into 1-word-at-a-time rapid pop-in phrases (Kai shorts 1-word pop-in style)
+    phrases = [[w] for w in words]
 
     import pysubs2
 
@@ -267,7 +259,7 @@ def build_word_subtitle_filter(
     subs.info["WrapStyle"] = "2"  # Strict single horizontal line
 
     margin_v = int(canvas_h * 0.18)  # Lower safe zone below speaker chin/chest
-    font_size = max(38, int(canvas_w * 0.052))  # Sleek single-line font size (no multi-line wrapping)
+    font_size = max(56, int(canvas_w * 0.078))  # Prominent, bold 1-word pop-in font size
     style = pysubs2.SSAStyle(
         fontname="Bebas Neue",
         fontsize=font_size,
