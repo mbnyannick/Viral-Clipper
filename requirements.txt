@@ -24,3 +24,6 @@ aiofiles>=23.2.0
 # Audio / Voice synthesis
 edge-tts>=7.0.0
 
+# Subtitle ASS generation
+pysubs2>=1.7.0
+
