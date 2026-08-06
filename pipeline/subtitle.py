@@ -125,6 +125,52 @@ def _escape_ffmpeg_text(text: str) -> str:
     return text.strip()
 
 
+_WORD_ABBREVIATIONS = {
+    "BECAUSE": "BC",
+    "WITHOUT": "W/O",
+    "SOMETHING": "SMTH",
+    "SOMEONE": "SM1",
+    "EVERYTHING": "EVRYTHNG",
+    "EVERYBODY": "EVRYBDY",
+    "INFORMATION": "INFO",
+    "GOVERNMENT": "GOV",
+    "PROBABLY": "PROB",
+    "DEFINITELY": "DEF",
+    "ABSOLUTELY": "ABS",
+    "ESPECIALLY": "ESP",
+    "NEVERMIND": "NVM",
+    "PLEASE": "PLS",
+    "PICTURE": "PIC",
+    "PICTURES": "PICS",
+    "TECHNOLOGY": "TECH",
+    "DEVELOPMENT": "DEV",
+    "COMMUNITY": "COMM",
+    "APPLICATION": "APP",
+    "APPLICATIONS": "APPS",
+    "MANAGEMENT": "MGMT",
+    "BUSINESS": "BIZ",
+    "EXPERIENCE": "EXP",
+    "AUTOMATICALLY": "AUTO",
+    "IMPORTANT": "IMPORT'T",
+    "DIFFERENCE": "DIFF",
+    "DIFFERENT": "DIFF",
+    "QUESTION": "QSTN",
+    "QUESTIONS": "QSTNS",
+    "MAXIMUM": "MAX",
+    "MINIMUM": "MIN",
+}
+
+
+def abbreviate_word(word: str) -> str:
+    """Abbreviate long words into snappy short-form equivalents for rapid shorts subtitles."""
+    clean_upper = re.sub(r"[^\w]", "", word).upper()
+    if clean_upper in _WORD_ABBREVIATIONS:
+        return _WORD_ABBREVIATIONS[clean_upper]
+    if len(clean_upper) > 11:
+        return clean_upper[:9] + ".."
+    return word.upper()
+
+
 def _clean_word_text(word: str) -> str:
     """Strip full stops, commas, quotes, and punctuation clutter from word text."""
     clean = re.sub(r"^[^\w]+|[^\w]+$", "", word).strip()
@@ -155,10 +201,10 @@ def build_word_subtitle_filter(
                 continue
             rel_start = max(0.0, round((w_start - clip_start) / speed_factor, 3)) + round(time_offset, 3)
             rel_end = max(rel_start + 0.05, round((w_end - clip_start) / speed_factor, 3) + round(time_offset, 3))
-            raw_w = mask_profanity(_clean_word_text(w["word"]))
+            raw_w = abbreviate_word(mask_profanity(_clean_word_text(w["word"])))
             if raw_w:
                 words.append({
-                    "word": _escape_ffmpeg_text(raw_w.upper()),
+                    "word": _escape_ffmpeg_text(raw_w),
                     "start": rel_start,
                     "end": rel_end,
                 })
@@ -180,10 +226,10 @@ def build_word_subtitle_filter(
                 w_e = w_s + w_dur
                 rel_start = max(0.0, round((w_s - clip_start) / speed_factor, 3)) + round(time_offset, 3)
                 rel_end = max(rel_start + 0.05, round((w_e - clip_start) / speed_factor, 3) + round(time_offset, 3))
-                clean_w = mask_profanity(_clean_word_text(rw))
+                clean_w = abbreviate_word(mask_profanity(_clean_word_text(rw)))
                 if clean_w:
                     words.append({
-                        "word": _escape_ffmpeg_text(clean_w.upper()),
+                        "word": _escape_ffmpeg_text(clean_w),
                         "start": rel_start,
                         "end": rel_end,
                     })
