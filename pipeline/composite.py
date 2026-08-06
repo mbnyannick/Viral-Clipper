@@ -200,16 +200,16 @@ async def _composite_one(
     norm_wm_path = output_dir / f"wm_norm_{moment.index:02d}.png"
     _, wm_w, wm_h = prepare_watermark(watermark_path, norm_wm_path)
 
-    is_square = False
+    is_square = layout_mode != "face_crop"
     if layout_mode == "face_crop":
         video_top_y = 0
         scaled_h = CANVAS_H
         crop_filter_str = "crop=ih*9/16:ih:(iw-ih*9/16)/2:0"
     else:
-        # Standard 4:3 Ratio Baseline for BLUR, BLACK, and pillarbox modes (720x540 centered in 720x1280 vertical canvas)
-        scaled_h = int(CANVAS_W * 3 / 4)  # 540px height for 4:3 video
-        video_top_y = (CANVAS_H - scaled_h) // 2  # 370px top position
-        crop_filter_str = _get_4_3_crop_filter()
+        # Standard 1:1 Square Ratio Baseline for BLUR, BLACK, and pillarbox modes (720x720 centered in 720x1280 vertical canvas)
+        scaled_h = CANVAS_W  # 720px height for 1:1 square video
+        video_top_y = (CANVAS_H - CANVAS_W) // 2  # 280px top position
+        crop_filter_str = _get_1_1_crop_filter()
 
     video_bottom_y = video_top_y + scaled_h
 

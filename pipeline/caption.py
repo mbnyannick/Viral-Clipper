@@ -180,9 +180,9 @@ def _draw_white_card(img: Image.Image, lines: list[str], emoji_str: str | None, 
     box_height = total_text_height + BOX_PAD_Y * 2
     box_x = (CANVAS_W - box_width) // 2
     
-    # 40px overlap into top edge of main video frame (TikTok / Reels reference positioning)
+    # 40px overlap into top edge of 1:1 main video frame (TikTok / Reels reference positioning)
     CAPTION_OVERLAP = 40
-    video_top_y = 370 if layout_mode != "face_crop" else 280
+    video_top_y = 280
     box_y = max(15, video_top_y - box_height + CAPTION_OVERLAP)
 
     shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
