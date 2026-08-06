@@ -94,10 +94,15 @@ SPEAKER & CAPTION IDENTIFICATION RULES (CRITICAL):
 7. EVEN TIMELINE DISTRIBUTION: Spread the {top_n} moments across the full timeline of the video (beginning, middle, and end).
 8. RELEVANT TOPIC HASHTAGS: For EVERY clip, generate 6 to 10 HIGHLY SPECIFIC, relevant hashtags based directly on the streamer's name, the video topic, guest names, and exact clip subject (e.g. "#{streamer} #TopicName #StreamerDrama #KickClips #FunnyMoments #TwitchHighlights"). NEVER return generic or irrelevant hashtags!
 
-CAPTION FORMAT:
-9. EXACTLY 3 LINES in caption_lines — Line 1 = HOOK with 1 ALL CAPS word. Lines 2–3 = PAYOFF with 1 more ALL CAPS word. Max 5 words/line.
-10. 100% UNIQUE PHRASING — no repeated words, hooks, or sentence structure across any clip in this batch.
-11. DO NOT put the emoji inside caption_lines — it belongs in the "emoji" field only.
+CAPTION FORMAT (3-LINE VIRAL STORYTELLING CARD):
+9. EXACTLY 3 LINES in caption_lines — Follow the viral 3-part narrative hook pattern:
+   - Line 1 = HOOK / SETUP with 1 ALL CAPS word (e.g. "she asked about VIRGINS")
+   - Line 2 = ACTION / RESPONSE (e.g. "he said yes" or "Bro responded instantly")
+   - Line 3 = PAYOFF / ESCALATION with 1 ALL CAPS word (e.g. "then she went FURTHER")
+   - Max 4–5 words per line. Keep Phrasing casual and natural.
+10. CAPS EMPHASIS WORDS: Put 1 key emphasis word in ALL CAPS in Line 1 and Line 3 so they automatically render in bold text on the top white card card overlay.
+11. 100% UNIQUE PHRASING — no repeated words, hooks, or sentence structure across any clip in this batch.
+12. DO NOT put emojis directly inside caption_lines — they belong in the "emoji" field only (which is appended to line 3 during PNG rendering).
 
 AURA KEYWORD RULE (100% CONTEXTUALLY RELEVANT):
 12. For EVERY clip, pick ONE single uppercase word that directly relates to what is happening in THIS SPECIFIC moment.
@@ -222,7 +227,7 @@ async def score_moments(
                     Moment(
                         index=i,
                         start=float(item["start"]),
-                        end=min(float(item["end"]), float(item["start"]) + 90.0),
+                        end=min(float(item["end"]) + 2.5, float(item["start"]) + 90.0),
                         caption_lines=list(item["caption_lines"]),
                         emoji=item.get("emoji", "🔥"),
                         score=int(item.get("score", 90)),

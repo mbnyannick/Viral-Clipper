@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 import cv2
 
-CANVAS_W = 1080
-CANVAS_H = 1920
+CANVAS_W = 720
+CANVAS_H = 1280
 GAP_PX = 36
 CAPTION_OVERLAP = 60   # px the caption overlaps INTO the top of the video frame @ 1080p
 
@@ -57,22 +57,25 @@ def _detect_action_motion_peak(clip_path: Path) -> float:
     best_frame_idx = int(fps * 1.5)
     prev_gray = None
 
-    # Step through frames at ~10 FPS for high performance
-    step = max(1, int(fps / 10.0))
-    for f_idx in range(0, total_frames, step):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+    # Scan frames sequentially for candidate teaser peak (first 15s max)
+    max_scan_frames = min(total_frames, int(fps * 15.0))
+    step = max(1, int(fps / 5.0))
+    curr_frame_idx = 0
+
+    while curr_frame_idx < max_scan_frames:
         ret, frame = cap.read()
         if not ret or frame is None:
-            continue
-
-        small = cv2.resize(frame, (320, 180))
-        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-        if prev_gray is not None:
-            diff = float(cv2.absdiff(gray, prev_gray).mean())
-            if diff > max_diff:
-                max_diff = diff
-                best_frame_idx = f_idx
-        prev_gray = gray
+            break
+        if curr_frame_idx % step == 0:
+            small = cv2.resize(frame, (160, 90))
+            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+            if prev_gray is not None:
+                diff = float(cv2.absdiff(gray, prev_gray).mean())
+                if diff > max_diff:
+                    max_diff = diff
+                    best_frame_idx = curr_frame_idx
+            prev_gray = gray
+        curr_frame_idx += 1
 
     cap.release()
     peak_sec = round(best_frame_idx / fps, 2)
@@ -127,12 +130,7 @@ def _probe_video_dims_filter(src_w: int, src_h: int, canvas_w: int, canvas_h: in
 
 
 def _get_4_3_crop_filter(src_w: int = 1920, src_h: int = 1080) -> str:
-    """Return FFmpeg vf snippet that center-crops a 16:9 source to 4:3.
-    The formula: new_w = src_h * 4 / 3, crop from center.
-    Works for any 16:9 resolution (1920x1080, 1280x720, etc.).
-    """
-    # We don't know exact source dims at filter-build time, so use expression-based crop:
-    # iw_4_3 = ih*4/3  → crop=ih*4/3:ih:(iw-ih*4/3)/2:0
+    """Return FFmpeg vf snippet that center-crops source video to 4:3 ratio cleanly."""
     return "crop=ih*4/3:ih:(iw-ih*4/3)/2:0"
 
 
@@ -177,9 +175,7 @@ def prepare_watermark(
 
 
 def _get_1_1_crop_filter() -> str:
-    """Return FFmpeg vf snippet that center-crops video footage to 1:1 square ratio.
-    Formula: crop=ih:ih:(iw-ih)/2:0 (crop square ih x ih from center).
-    """
+    """Return FFmpeg vf snippet that center-crops video footage to clean 1:1 square ratio showing full head & chest."""
     return "crop=ih:ih:(iw-ih)/2:0"
 
 
@@ -204,19 +200,15 @@ async def _composite_one(
     norm_wm_path = output_dir / f"wm_norm_{moment.index:02d}.png"
     _, wm_w, wm_h = prepare_watermark(watermark_path, norm_wm_path)
 
-    is_square = ("1_1" in layout_mode) or ("square" in layout_mode)
-    if is_square:
-        scaled_h = CANVAS_W  # 720px height for 1:1
-        video_top_y = (CANVAS_H - CANVAS_W) // 2  # 280px
-        crop_filter_str = _get_1_1_crop_filter()
-    elif layout_mode != "face_crop":
-        scaled_h = CANVAS_W * 3 // 4  # 540px height for 4:3
-        video_top_y = (CANVAS_H - scaled_h) // 2  # 370px
-        crop_filter_str = _get_4_3_crop_filter()
-    else:
+    if layout_mode == "face_crop":
         video_top_y = 0
         scaled_h = CANVAS_H
         crop_filter_str = ""
+    else:
+        # Standard 1:1 Square Ratio Baseline for BLUR, BLACK, and pillarbox modes
+        scaled_h = CANVAS_W  # 720px height for 1:1 (720x720 video centered vertically)
+        video_top_y = (CANVAS_H - CANVAS_W) // 2  # 280px top position
+        crop_filter_str = _get_1_1_crop_filter()
 
     video_bottom_y = video_top_y + scaled_h
 
@@ -239,13 +231,19 @@ async def _composite_one(
     try:
         from .voiceover import generate_voiceover
         vo_file = await generate_voiceover(str(vo_script), vo_path)
-        if vo_file and vo_file.exists():
+        if vo_file and vo_file.exists() and vo_file.stat().st_size > 1000:
             res = subprocess.run(
                 ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(vo_file)],
                 capture_output=True, text=True, check=True, timeout=5
             )
             vo_dur = float(res.stdout.strip())
             logger.info("  Voiceover hook duration: %.2fs (teaser concat + 100%% lip sync offset)", vo_dur)
+        elif vo_file and vo_file.exists():
+            try:
+                vo_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+            vo_file = None
     except Exception as vo_exc:
         logger.warning("Voiceover generation exception: %s", vo_exc)
 
@@ -473,23 +471,23 @@ async def _composite_one(
     mix_inputs = ["[orig_a]"]
 
     if vo_input_idx is not None:
-        audio_mix_filters.append(f"[{vo_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=8.0[vo_a]")
+        audio_mix_filters.append(f"[{vo_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.2[vo_a]")
         mix_inputs.append("[vo_a]")
 
     if bgm_input_idx is not None:
-        audio_mix_filters.append(f"[{bgm_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.25,aloop=loop=-1:size=2e+09[bgm_a]")
+        audio_mix_filters.append(f"[{bgm_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0,aloop=loop=-1:size=2e+09[bgm_a]")
         mix_inputs.append("[bgm_a]")
 
     if sfx_input_idx is not None:
         # Detect exact millisecond of physical action peak
         sfx_peak_sec = _detect_action_motion_peak(clip_path)
         sfx_delay_ms = int((sfx_peak_sec + vo_dur) * 1000)
-        audio_mix_filters.append(f"[{sfx_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.25,adelay=delays={sfx_delay_ms}|{sfx_delay_ms}[sfx_a]")
+        audio_mix_filters.append(f"[{sfx_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0,adelay=delays={sfx_delay_ms}|{sfx_delay_ms}[sfx_a]")
         mix_inputs.append("[sfx_a]")
 
     if len(mix_inputs) > 1:
         mix_str = "".join(mix_inputs)
-        audio_mix_filters.append(f"{mix_str}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=0:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[outa]")
+        audio_mix_filters.append(f"{mix_str}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=0:normalize=0,volume=2.2,aformat=sample_rates=48000:channel_layouts=stereo[outa]")
     else:
         audio_mix_filters.append("[orig_a]aformat=sample_rates=48000:channel_layouts=stereo[outa]")
 
@@ -560,7 +558,7 @@ async def _composite_one(
 
 import sys
 
-_COMPOSITE_SEMAPHORE = asyncio.Semaphore(2)
+_COMPOSITE_SEMAPHORE = asyncio.Semaphore(1)
 
 
 def _get_v_encoder_args() -> list[str]:
@@ -568,11 +566,11 @@ def _get_v_encoder_args() -> list[str]:
         return ["-c:v", "h264_videotoolbox", "-b:v", "12000k"]
     return [
         "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "18",
+        "-preset", "superfast",
+        "-crf", "21",
         "-maxrate", "12000k",
         "-bufsize", "24000k",
-        "-threads", "4",
+        "-threads", "2",
     ]
 
 

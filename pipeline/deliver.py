@@ -6,6 +6,7 @@ numbered caption (e.g. "Clip 1/10") so the operator always knows exactly
 which clip they're looking at and can tick them off one by one when posting.
 """
 
+import asyncio
 import html
 import logging
 import os

@@ -23,14 +23,29 @@ logger = logging.getLogger(__name__)
 from .download import download_video_clip_range
 
 
+import subprocess
+
+
+def _is_valid_mp4(p: Path) -> bool:
+    """Verify that p exists, has non-zero size, and has a valid moov atom readable by ffprobe."""
+    if not p.exists() or p.stat().st_size < 1000:
+        return False
+    try:
+        res = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(p)],
+            capture_output=True, text=True, timeout=5
+        )
+        return res.returncode == 0 and bool(res.stdout.strip())
+    except Exception:
+        return False
+
+
 async def _cut_one(source: Path, moment: Moment, output_dir: Path, url: str = "") -> Path:
     """Cut a single clip from *source* using ffmpeg or fetch HD segment range via yt-dlp."""
     out_path = output_dir / f"clip_{moment.index:02d}.mp4"
     dur = moment.end - moment.start
 
     if source.exists() and source.suffix.lower() == ".mp4":
-        # Fast, frame-accurate clip extraction via ultrafast re-encode
-        # This prevents the lip-sync drift caused by `-c copy` snapping to keyframes
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-y",
             "-ss", str(moment.start),
@@ -41,15 +56,20 @@ async def _cut_one(source: Path, moment: Moment, output_dir: Path, url: str = ""
             "-crf", "23",
             "-c:a", "aac",
             "-b:a", "192k",
+            "-avoid_negative_ts", "make_zero",
             str(out_path),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
         await proc.communicate()
 
-        # Fallback to ultrafast re-encode if stream copy produced corrupt/empty file
-        if not out_path.exists() or out_path.stat().st_size < 1000:
-            logger.warning("Stream copy failed for clip %02d — falling back to fast re-encode", moment.index)
+        if not _is_valid_mp4(out_path):
+            logger.warning("Fast clip extraction produced invalid MP4 for clip %02d — retrying with safety re-encode", moment.index)
+            if out_path.exists():
+                try:
+                    out_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
             proc_fallback = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-y",
                 "-ss", str(moment.start),
@@ -57,6 +77,7 @@ async def _cut_one(source: Path, moment: Moment, output_dir: Path, url: str = ""
                 "-t", str(dur),
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "24",
                 "-c:a", "aac",
+                "-avoid_negative_ts", "make_zero",
                 str(out_path),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
@@ -64,6 +85,11 @@ async def _cut_one(source: Path, moment: Moment, output_dir: Path, url: str = ""
             await proc_fallback.communicate()
     else:
         target_url = url if url else str(source)
+        await download_video_clip_range(target_url, moment.start, moment.end, out_path)
+
+    if not _is_valid_mp4(out_path):
+        target_url = url if url else str(source)
+        logger.warning("Source cut invalid for clip %02d — falling back to direct range stream download", moment.index)
         await download_video_clip_range(target_url, moment.start, moment.end, out_path)
 
     if not out_path.exists():

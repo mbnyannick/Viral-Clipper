@@ -23,29 +23,29 @@ from .subtitle import mask_profanity
 
 logger = logging.getLogger(__name__)
 
-# ── 1080p Full HD Canvas (1080×1920) ───────────────────────────────────────────
-CANVAS_W: int = 1080
-CANVAS_H: int = 1920
+# ── 720p HD Canvas Scaling (720×1280) ──────────────────────────────────────────
+CANVAS_W: int = 720
+CANVAS_H: int = 1280
 
-# 4:3 video zone on 1080×1920 (video = 1080×810, centered)
-_VIDEO_TOP_Y: int = (CANVAS_H - CANVAS_W * 3 // 4) // 2   # = 555
-_VIDEO_BOT_Y: int = _VIDEO_TOP_Y + CANVAS_W * 3 // 4       # = 1365
+# 4:3 video zone on 720×1280 (video = 720×540, centered)
+_VIDEO_TOP_Y: int = (CANVAS_H - CANVAS_W * 3 // 4) // 2   # = 370
+_VIDEO_BOT_Y: int = _VIDEO_TOP_Y + CANVAS_W * 3 // 4       # = 910
 
-# ── Typography & 1080p Scaling ────────────────────────────────────────────────
-FONT_SIZE: int   = 51        # Crisp readable 1080p size for top blur bar
-LINE_GAP: int    = 12
-WORD_GAP: int    = 10
+# ── Typography & 720p Scaling ────────────────────────────────────────────────
+FONT_SIZE: int   = 32        # Clean, highly readable 720p font size
+LINE_GAP: int    = 8
+WORD_GAP: int    = 8
 
-# ── Box style (1080p Full HD rounded white card) ─────────────────────────────
+# ── Box style (720p HD rounded white card) ──────────────────────────────────
 BOX_BG       = (255, 255, 255, 255)  # crisp pure white
-BOX_RADIUS   = 24                    # smooth 24px rounded corners @ 1080p
-BOX_PAD_X    = 36                    # spacious side padding @ 1080p
-BOX_PAD_Y    = 21                    # top/bottom padding @ 1080p
+BOX_RADIUS   = 16                    # smooth 16px rounded corners
+BOX_PAD_X    = 24                    # spacious side padding
+BOX_PAD_Y    = 14                    # top/bottom padding
 TEXT_COLOR   = (15, 15, 15)          # bold dark text
 
 # ── Box center positions ──────────────────────────────────────────────────────
-_BOX_CENTER_PILLARBOX: int = 450
-_BOX_CENTER_FACECROP: int  = 210
+_BOX_CENTER_PILLARBOX: int = 280
+_BOX_CENTER_FACECROP: int  = 140
 
 _SYSTEM_EMOJI_PATHS = [
     "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
@@ -139,12 +139,19 @@ def _build_line_tokens(
     normal_f: ImageFont.FreeTypeFont,
     emph_f:   ImageFont.FreeTypeFont,
 ) -> list[tuple]:
-    """Word tokens for one line. ALL CAPS words get the bold emphasis font."""
-    return [
-        (w, emph_f if _is_emphasis(w) else normal_f, False)
-        for w in line_text.split()
-        if w.strip()
-    ]
+    """Word tokens for one line. Normal words are lowercase (normal font), emphasis words are ALL CAPS & BOLD."""
+    tokens = []
+    for w in line_text.split():
+        clean_w = w.strip()
+        if not clean_w:
+            continue
+        if _is_emphasis(clean_w):
+            # Emphasis keyword — keep ALL CAPS and use bold font
+            tokens.append((clean_w, emph_f, False))
+        else:
+            # Normal word — convert to lowercase for clean casual aesthetic (matches reference screenshot)
+            tokens.append((clean_w.lower(), normal_f, False))
+    return tokens
 
 
 def _clean_caption_text(text: str) -> str:
@@ -185,7 +192,7 @@ def _draw_white_card(
     box_inner_w = max_row_w
     box_inner_h = FONT_SIZE * n_lines + LINE_GAP * max(0, n_lines - 1)
 
-    box_w = max(690, min(CANVAS_W - 120, box_inner_w + BOX_PAD_X * 2))
+    box_w = min(CANVAS_W - 48, max(420, box_inner_w + BOX_PAD_X * 2))
     box_inner_w = box_w - BOX_PAD_X * 2
     box_h = box_inner_h + BOX_PAD_Y * 2
 
@@ -270,18 +277,9 @@ def render_caption(
     if eff_include_emoji and moment.emoji:
         emoji_str = moment.emoji.strip() or None
 
-    # Choose box center y and video top position based on layout
-    if "1_1" in layout_mode or "square" in layout_mode:
-        video_top_y = (CANVAS_H - CANVAS_W) // 2  # = 280px top for 1:1 square video
-    else:
-        video_top_y = _VIDEO_TOP_Y  # = 370px top for 4:3 video
-
-    if layout_mode == "face_crop":
-        # Face crop is full 9:16 — treat top of video as ~370px (same as 4:3 blurred)
-        # so the white card appears at same height as blurred/black canvas modes
-        box_center_y = _VIDEO_TOP_Y - 70
-    else:
-        box_center_y = video_top_y - 70
+    # 1:1 Square baseline position for all layouts (720x720 video centered at y=280px to y=1000px)
+    video_top_y = (CANVAS_H - CANVAS_W) // 2  # = 280px top for 1:1 square video
+    box_center_y = video_top_y - 70
 
     img = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
 

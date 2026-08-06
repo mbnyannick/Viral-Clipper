@@ -192,17 +192,17 @@ def build_word_subtitle_filter(
         logger.info("  No word timestamps for clip [%.1f-%.1f] — skipping subtitles", clip_start, clip_end)
         return None, None
 
-    # Group words into clean 2 to 3-word phrases
+    # Group words into clean 1 to 2-word phrases (Strict Single Horizontal Line — Never Stacked!)
     phrases = []
     current_phrase = []
     for w in words:
         current_phrase.append(w)
-        if len(current_phrase) >= 3:
+        if len(current_phrase) >= 2:
             phrases.append(current_phrase)
             current_phrase = []
         elif w != words[-1]:
             next_w = words[words.index(w) + 1]
-            if next_w["start"] - w["end"] > 0.30:
+            if next_w["start"] - w["end"] > 0.25:
                 phrases.append(current_phrase)
                 current_phrase = []
     if current_phrase:
@@ -218,29 +218,37 @@ def build_word_subtitle_filter(
             cs = 0
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
-    # Eye-level vertical position (lower 20% from bottom, clean safe zone)
+    # Lower 20% vertical position (below speaker chin/chest, clean safe zone)
     margin_v = int(canvas_h * 0.20)
-    font_size = max(42, int(canvas_w * 0.044))
+    font_size = max(46, int(canvas_w * 0.064))  # Crisp single-line font size
 
-    # ASS Color spec: &HBBGGRR& (PrimaryColour = White &H00FFFFFF, SecondaryColour = Vibrant Yellow &H0000FFFF)
-    ass_lines = [
-        "[Script Info]",
-        "ScriptType: v4.00+",
-        f"PlayResX: {canvas_w}",
-        f"PlayResY: {canvas_h}",
-        "",
-        "[V4+ Styles]",
-        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        # CapCut Karaoke Style — Primary = White, Secondary = Vibrant Yellow fill on active spoken word
-        f"Style: CapCutKaraoke,Inter-Bold,{font_size},&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3.5,1.5,2,24,24,{margin_v},1",
-        "",
-        "[Events]",
-        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
-    ]
+    import pysubs2
+
+    subs = pysubs2.SSAFile()
+    subs.info["PlayResX"] = str(canvas_w)
+    subs.info["PlayResY"] = str(canvas_h)
+    subs.info["WrapStyle"] = "2"  # Strict single horizontal line (no multi-line stacking!)
+
+    style = pysubs2.SSAStyle(
+        fontname="Roboto Medium",
+        fontsize=font_size,
+        primarycolor=pysubs2.Color(255, 255, 255),    # Pure White
+        secondarycolor=pysubs2.Color(255, 255, 255),  # 100% Pure White (No yellow!)
+        outlinecolor=pysubs2.Color(0, 0, 0),          # Black outline/glow
+        backcolor=pysubs2.Color(0, 0, 0, 160),
+        bold=True,                                     # Bold white text
+        outline=3.5,                                   # Clean 3.5px black outline
+        shadow=1.5,                                    # Subtle drop shadow glow
+        alignment=2,                                  # Bottom-center alignment
+        marginl=10,
+        marginr=10,
+        marginv=margin_v,
+    )
+    subs.styles["CapCutKaraoke"] = style
 
     for p in phrases:
-        p_start = p[0]["start"]
-        p_end = max(p_start + 0.5, p[-1]["end"] + 0.15)
+        p_start_ms = int(p[0]["start"] * 1000)
+        p_end_ms = int((p[-1]["end"] + 0.03) * 1000)
 
         karaoke_parts = []
         for i, w in enumerate(p):
@@ -252,36 +260,43 @@ def build_word_subtitle_filter(
                     gap_cs = int(round(gap_sec * 100))
                     karaoke_parts.append(f"{{\\k{gap_cs}}}")
             
-            # {\kf<cs>} creates silky smooth left-to-right yellow fill tracking
-            karaoke_parts.append(f"{{\\kf{dur_cs}}}{w['word']}")
+            # Render words in pure solid white text
+            karaoke_parts.append(f"{{\\k{dur_cs}}}{w['word']}")
 
-        full_karaoke_text = " ".join(karaoke_parts)
-        ass_lines.append(f"Dialogue: 0,{_format_ass_time(p_start)},{_format_ass_time(p_end)},CapCutKaraoke,,0,0,0,,{full_karaoke_text}")
+        # {\q2} forces libass to NEVER wrap text onto a 2nd or 3rd line under any circumstances!
+        full_karaoke_text = "{\\q2}" + " ".join(karaoke_parts)
+        event = pysubs2.SSAEvent(
+            start=p_start_ms,
+            end=p_end_ms,
+            style="CapCutKaraoke",
+            text=full_karaoke_text
+        )
+        subs.events.append(event)
 
     import tempfile
     import uuid
     tmp_path = Path(tempfile.gettempdir()) / f"sub_{uuid.uuid4().hex}.ass"
-    tmp_path.write_text("\n".join(ass_lines), encoding="utf-8")
+    subs.save(str(tmp_path))
 
-    logger.info("  Generated CapCut Karaoke ASS subtitles with %d phrases: %s", len(phrases), tmp_path)
+    logger.info("  Generated CapCut Karaoke ASS subtitles via pysubs2 with %d phrases: %s", len(phrases), tmp_path)
     return str(tmp_path), None
 
 
 def build_aura_keyword_filter(
     aura_word: str,
     moment_duration: float,
-    canvas_w: int = 1080,
-    canvas_h: int = 1920,
+    canvas_w: int = 720,
+    canvas_h: int = 1280,
     font_path: str | None = None,
-    appear_at: float = 1.5,
-    hold_duration: float = 1.8,
+    appear_at: float = 1.2,
+    hold_duration: float = 4.0,
 ) -> str | None:
     """
     Build an FFmpeg drawtext filter that flashes a single cinematic keyword (*WORD*)
-    on screen at the clip's peak moment — like *COOKED*, *IMPRESSED*, *WHO* in viral thumbnails.
+    on screen at the clip's peak moment — like *COOKED*, *IMPRESSED*, *EXPOSED* in viral clips.
 
-    The word appears at `appear_at` seconds into the clip and stays for `hold_duration` seconds.
-    Style: massive yellow bold text with thick black stroke, centered, with a punch-in scale effect.
+    The word appears at `appear_at` seconds into the clip and stays for `hold_duration` seconds (3–5s).
+    Style: high-impact bold yellow text with thick black stroke, centered in the middle of the screen.
 
     Returns a drawtext filter string to append to the FFmpeg filtergraph, or None if no word.
     """
@@ -293,23 +308,23 @@ def build_aura_keyword_filter(
     if not word:
         return None
 
-    # Display with asterisks like *COOKED* for maximum visual impact
+    # Display with asterisks like *EXPOSED* for maximum visual impact
     display_text = f"*{word}*"
 
     # Escape for FFmpeg drawtext
     safe_text = display_text.replace("'", "\u2019").replace(":", "\\:").replace("%", "\\%")
 
-    # Timing
+    # Timing: hold for 4 seconds (3-5s)
     t_start = max(0.1, appear_at)
     t_end = min(moment_duration - 0.2, t_start + hold_duration)
-    if t_end <= t_start:
+    if t_end <= t_start + 1.0:
         t_end = t_start + hold_duration
 
-    # Sleek, high-impact font sizing — ~5% of canvas width (52px @ 1080p, sleek & non-obtrusive)
-    font_size = max(42, int(canvas_w * 0.048))
+    # Large high-impact font sizing — ~11% of canvas width (79px @ 720p, bold & centered)
+    font_size = max(68, int(canvas_w * 0.11))
 
-    # Upper 26% vertical position (comfortably above video frame, zero screen overlap)
-    y_pos = int(canvas_h * 0.26)
+    # Centered in the middle of screen (48% vertical position)
+    y_pos = int(canvas_h * 0.48)
 
     # Font resolution — use bundled bold font if available
     font_file_filter = ""
@@ -347,7 +362,7 @@ def build_aura_keyword_filter(
         f"{font_file_filter}"
         f"text='{safe_text}':"
         f"fontsize={font_size}:"
-        f"fontcolor=#FFD700:"
+        f"fontcolor=yellow:"
         f"borderw=6:"
         f"bordercolor=black:"
         f"shadowx=4:shadowy=4:shadowcolor=black@0.9:"

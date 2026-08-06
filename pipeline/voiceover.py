@@ -34,7 +34,44 @@ async def generate_voiceover(text: str, output_path: Path, voice: str | None = N
     clean_text = text.strip()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 1. OpenAI TTS-HD Studio Human Voice ("onyx" / "alloy" / "echo")
+    # 0. Fish Audio TTS (s2.1-pro — Deep Male Narrator Voice)
+    fish_key = os.environ.get("FISH_AUDIO_API_KEY", "").strip()
+    if fish_key:
+        try:
+            import json
+            import urllib.request
+            # Default: deep authoritative male narrator voice
+            fish_voice_id = os.environ.get("FISH_AUDIO_VOICE_ID", "").strip()
+            req_body = {
+                "text": clean_text,
+                "format": "mp3",
+                "mp3_bitrate": 128,
+            }
+            if fish_voice_id:
+                req_body["reference_id"] = fish_voice_id
+            req_data = json.dumps(req_body).encode("utf-8")
+            headers = {
+                "Authorization": f"Bearer {fish_key}",
+                "Content-Type": "application/json",
+                "model": "s2.1-pro-free",
+            }
+            req = urllib.request.Request(
+                "https://api.fish.audio/v1/tts",
+                data=req_data,
+                headers=headers,
+                method="POST",
+            )
+            def _fetch_fish():
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    output_path.write_bytes(resp.read())
+            await asyncio.to_thread(_fetch_fish)
+            if output_path.exists() and output_path.stat().st_size > 1000:
+                logger.info("Fish Audio TTS voiceover generated: %s (size=%d bytes)", output_path.name, output_path.stat().st_size)
+                return output_path
+            else:
+                logger.warning("Fish Audio TTS returned empty/tiny file, falling back")
+        except Exception as exc:
+            logger.warning("Fish Audio TTS failed: %s", exc)
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if api_key:
         try:
@@ -150,6 +187,11 @@ async def generate_voiceover(text: str, output_path: Path, voice: str | None = N
     except Exception as free_exc:
         logger.warning("Google Free TTS failed: %s", free_exc)
 
+    if output_path.exists() and output_path.stat().st_size == 0:
+        try:
+            output_path.unlink(missing_ok=True)
+        except Exception:
+            pass
     logger.warning("No active TTS engine available for voiceover narration.")
     return None
 

@@ -18,7 +18,7 @@ from telegram.ext import ContextTypes
 from pipeline.download import download, extract_metadata, _kick_vod_get_hls_url
 from pipeline.chunk import chunk_audio
 from pipeline.transcribe import transcribe_chunks
-from pipeline.score import score_moments, generate_clip_captions, normalize_streamer_name
+from pipeline.score import score_moments, generate_clip_captions, normalize_streamer_name, Moment
 from pipeline.clip import cut_clips
 from pipeline.caption import render_captions
 from pipeline.composite import composite_clips
@@ -64,44 +64,16 @@ def estimate_processing_time(duration_seconds: float, layout_mode: str = "pillar
 
 
 class _SmartNotifier:
-    """
-    Manages progress notifications according to the specified schedule:
-    - Phase 1: Update every 60s (up to 4 mins)
-    - 5 mins: "taking longer than expected..."
-    - >5 mins: update every 5-10 minutes
-    """
+    """No-op notifier — status updates are cleanly edited in-place via progress cards."""
 
     def __init__(self, bot, chat_id: int | str) -> None:
-        self.bot = bot
-        self.chat_id = chat_id
-        self.start_time = time.time()
-        self._task: asyncio.Task | None = None
-
-    async def _loop(self) -> None:
-        for _ in range(4):
-            await asyncio.sleep(60)
-            await self._send("⚡ Processing your video... Still cooking up the clips!")
-
-        await self._send("⏳ This video is taking longer than expected, but I'm still processing it...")
-
-        while True:
-            await asyncio.sleep(300)
-            await self._send("⏳ Still processing your video stream... Thank you for your patience!")
-
-    async def _send(self, text: str) -> None:
-        try:
-            await self.bot.send_message(chat_id=self.chat_id, text=text)
-        except Exception as exc:
-            logger.warning("Notification send failed: %s", exc)
+        pass
 
     def start(self) -> None:
-        if self._task is None or self._task.done():
-            self.start_time = time.time()
-            self._task = asyncio.create_task(self._loop())
+        pass
 
     def stop(self) -> None:
-        if self._task and not self._task.done():
-            self._task.cancel()
+        pass
 
 
 async def run_pipeline(
@@ -355,8 +327,8 @@ async def run_pipeline(
                 layout_mode = "face_crop"
                 logger.info("Smart Auto: Selected 'face_crop' (MediaPipe Face Tracking) for <=60s clip")
 
-        # ── 5. Cut, Render & Composite ──────────────────────────────────────────
-        await update_status(f"✂️ 4/6 — Compositing {len(moments)} Clips & AI Voiceover...")
+        # ── 5. Cut, Render & Composite with Progressive Delivery ──────────────────────────
+        await update_status(f"✂️ 4/5 — Compositing {len(moments)} Clips & Generating AI Voiceover...")
         clips_dir = run_dir / "clips"
         clips = await cut_clips(video_path, moments, clips_dir, url=url)
 
@@ -371,6 +343,9 @@ async def run_pipeline(
         )
 
         finals_dir = run_dir / "finals"
+        thumbs_dir = run_dir / "thumbnails"
+        thumbs_dir.mkdir(parents=True, exist_ok=True)
+
         watermark_custom = Path("tmp/custom_watermark.png")
         if enable_watermark and watermark_custom.exists():
             watermark_path = watermark_custom
@@ -379,101 +354,84 @@ async def run_pipeline(
         else:
             watermark_path = _ASSETS_DIR / "no_watermark.png"
 
-        final_clips, clip_captions = await asyncio.gather(
-            composite_clips(
-                clips,
-                captions,
-                watermark_path,
-                moments,
-                finals_dir,
-                layout_mode=layout_mode,
-                enable_silence_cut=enable_silence_cut,
-                enable_subtitles=enable_subtitles,
-                segments=segments,
-            ),
+        # Start generating SEO captions in background
+        caption_gen_task = asyncio.create_task(
             generate_clip_captions(
                 moments,
                 api_key=os.environ["DEEPSEEK_API_KEY"],
                 streamer=streamer_name,
                 video_title=video_title,
                 campaign_brief=campaign_brief,
-            ),
+            )
         )
 
-        # ── 5. HD Cover Thumbnail Generation Pass ─────────────────────────────
-        await update_status(f"🎨 5/6 — Generating HD Cover Cards & Thumbnails...")
+        delivered_clips_map: dict[int, Path] = {}
+        total_moments = len(moments)
+
+        async def _on_progressive_clip_ready(final_path: Path, m: Moment) -> None:
+            """Fired IMMEDIATELY when a single clip finishes compositing."""
+            clip_idx = m.index
+            logger.info("⚡ [PROGRESSIVE PIPELINE] Clip #%02d finished compositing — starting instant QA & delivery pass", clip_idx + 1)
+
+            # 1. HD Thumbnail generation pass
+            try:
+                from pipeline.thumbnail import generate_cover_thumbnail
+                cap_png = captions[clip_idx][0] if clip_idx < len(captions) else None
+                src_clip = clips[clip_idx] if clip_idx < len(clips) else final_path
+                thumb_out = thumbs_dir / f"thumbnail_{clip_idx:02d}.jpg"
+                await generate_cover_thumbnail(src_clip, m, thumb_out, cap_png)
+                logger.info("  Generated thumbnail for Clip #%02d", clip_idx + 1)
+            except Exception as thumb_exc:
+                logger.warning("Thumbnail generation warning for clip #%02d: %s", clip_idx + 1, thumb_exc)
+
+            # 2. Quality Gate & Instant Telegram Delivery
+            if final_path.exists() and final_path.stat().st_size > 50000:
+                delivered_clips_map[clip_idx] = final_path
+                deliv_count = len(delivered_clips_map)
+                await update_status(f"🚀 Delivering Clip {deliv_count}/{total_moments} to Telegram...")
+
+                try:
+                    await deliver_clips(
+                        [final_path], bot, chat_id, moments=[m], streamer=streamer_name
+                    )
+                    logger.info("  [INSTANT DELIVERY] Delivered Clip #%02d to chat %s", clip_idx + 1, chat_id)
+                except Exception as deliv_exc:
+                    logger.warning("Instant delivery failed for clip #%02d: %s", clip_idx + 1, deliv_exc)
+
+        # Composite all clips concurrently while delivering each clip the instant it's rendered
+        final_clips = await composite_clips(
+            clips,
+            captions,
+            watermark_path,
+            moments,
+            finals_dir,
+            layout_mode=layout_mode,
+            enable_silence_cut=enable_silence_cut,
+            enable_subtitles=enable_subtitles,
+            segments=segments,
+            on_clip_ready=_on_progressive_clip_ready,
+        )
+
         try:
-            from pipeline.thumbnail import generate_cover_thumbnail
-            thumbs_dir = run_dir / "thumbnails"
-            thumbs_dir.mkdir(parents=True, exist_ok=True)
-
-            thumb_tasks = [
-                generate_cover_thumbnail(cp, m, thumbs_dir / f"thumbnail_{m.index:02d}.jpg", cap_info[0])
-                for cp, cap_info, m in zip(clips, captions, moments)
-            ]
-
-
-            await asyncio.gather(*thumb_tasks)
-            logger.info("Generated %d HD Cover Thumbnails", len(final_clips))
-        except Exception as thumb_exc:
-            logger.warning("Thumbnail generation warning (continuing delivery): %s", thumb_exc)
-
-        # ── 6. Step 6/6: Quality Gate & Verification Pass ───────────────────────
-        await update_status("🔍 6/6 — Quality Gate Verification (Validating Voiceover, BGM & Glowing Subtitles)...")
-        verified_clips = []
-        for fc, m in zip(final_clips, moments):
-            p = Path(fc)
-            is_valid_9_16 = False
-            if p.exists() and p.stat().st_size > 50000:
-                try:
-                    probe_cmd = ["ffprobe", "-v", "quiet", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(p)]
-                    proc = await asyncio.create_subprocess_exec(*probe_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-                    w, h = map(int, out.decode().strip().split(","))
-                    if (w * 16 == h * 9) or (w == 1080 and h == 1920) or (w == 2160 and h == 3840) or (w == 720 and h == 1280) or (h > w):
-                        is_valid_9_16 = True
-                except Exception:
-                    pass
-
-            if is_valid_9_16:
-                logger.info("  [QA GATE PASSED] Clip #%02d verified 9:16 vertical (720x1280, size=%.1f MB)", m.index, p.stat().st_size / (1024*1024))
-                verified_clips.append(fc)
-            else:
-                logger.warning("  [QA GATE RETRY] Clip #%02d failed 9:16 vertical verification — force re-compositing...", m.index)
-                try:
-                    re_clip = await composite_clips([clips[m.index]], [captions[m.index]], watermark_path, [m], finals_dir, layout_mode=layout_mode, enable_silence_cut=enable_silence_cut, enable_subtitles=enable_subtitles, segments=segments)
-                    verified_clips.extend(re_clip)
-                except Exception as qa_exc:
-                    logger.error("QA Gate retry error for clip #%02d: %s", m.index, qa_exc)
-                    verified_clips.append(fc)
-
-        final_clips = verified_clips
-
+            clip_captions = await caption_gen_task
+        except Exception:
+            clip_captions = []
 
         notifier.stop()
-
-        # ── "Almost Ready" Announcement ─────────────────────────────────────────
-        await send_msg("⚡ Your verified clips are ready!", parse_mode="")
-
-        # ── 6. Delivery ─────────────────────────────────────────────────────────
-        if chat_id in active_run_status:
-            active_run_status[chat_id]["step"] = "Delivering Verified Clips to Telegram..."
-        await deliver_clips(final_clips, bot, chat_id, moments=moments, clip_captions=clip_captions)
-
 
         # ── Build pending schedule session for "Schedule All" confirmation ──────
         try:
             from bot.handlers import _pending_schedule_sessions
-            clips_dir = Path("tmp/clips")
-            clips_dir.mkdir(parents=True, exist_ok=True)
+            clips_public_dir = Path("tmp/clips")
+            clips_public_dir.mkdir(parents=True, exist_ok=True)
             session_clips = []
             for idx, (clip_path, m) in enumerate(zip(final_clips, moments or []), start=1):
                 if not clip_path or not Path(clip_path).exists():
                     continue
                 safe_fid = "".join(c for c in clip_path.name if c.isalnum())[:20]
                 public_filename = f"clip_{safe_fid}.mp4"
-                public_path = clips_dir / public_filename
+                public_path = clips_public_dir / public_filename
                 try:
-                    import shutil
                     if not public_path.exists():
                         shutil.copy2(clip_path, public_path)
                     video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
@@ -498,7 +456,6 @@ async def run_pipeline(
         except Exception as sess_exc:
             logger.warning("Could not build schedule session: %s", sess_exc)
 
-
         op_admin_id = os.environ.get("TELEGRAM_OPERATOR_CHAT_ID", "").strip()
         is_admin_run = bool(op_admin_id and str(chat_id).strip() == op_admin_id)
 
@@ -507,7 +464,7 @@ async def run_pipeline(
             for idx, cap in enumerate(clip_captions, start=1):
                 clean_cap = html.escape(cap.strip())
                 title_blocks.append(f"📌 <b>Clip {idx:02d} YouTube Title:</b>\n<code>{clean_cap}</code>")
-            
+
             header = (
                 f"🔴 <b>YouTube Titles (Clips 01–{len(clip_captions):02d})</b>\n"
                 f"<i>Tap any box below to copy its YouTube title & hashtags:</i>\n\n"
