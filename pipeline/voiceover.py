@@ -123,6 +123,17 @@ async def generate_voiceover(text: str, output_path: Path, voice: str | None = N
         except Exception as exc:
             logger.warning("OpenAI TTS failed: %s", exc)
 
+    # 3.5 Microsoft Edge-TTS Free Neural Male Voice ("en-US-ChristopherNeural")
+    try:
+        import edge_tts
+        communicate = edge_tts.Communicate(clean_text, "en-US-ChristopherNeural")
+        await communicate.save(str(output_path))
+        if output_path.exists() and output_path.stat().st_size > 0:
+            logger.info("Edge-TTS neural male voiceover generated: %s", output_path.name)
+            return output_path
+    except Exception as edge_exc:
+        logger.warning("Edge-TTS failed: %s", edge_exc)
+
     # 4. Google Translate Free TTS Fallback
     try:
         import urllib.parse
