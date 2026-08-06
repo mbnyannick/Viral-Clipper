@@ -106,12 +106,12 @@ AURA KEYWORD RULE (CRITICAL):
     - Choose the word that would make someone STOP scrolling if they saw it flash on screen
     - Match the energy: use COOKED/DONE for fails, AURA/REAL for swag moments, IMPRESSED/SHOCKED for reactions, CAUGHT/EXPOSED for drama, DEAD/CRYING for comedy
 
-TITLE FORMAT (CRITICAL — SHORT = MORE VIRAL):
-13. YouTube Shorts title MUST be MAXIMUM 50 characters (including emoji). Shorter titles create more curiosity and more clicks.
-    - Use curiosity gaps: leave the viewer wondering what happened (e.g. "He Did WHAT?! 😱", "Kai Is COOKED 💀", "Bro Said This... 😂")
-    - NEVER write long descriptive titles — if it explains too much, CUT IT DOWN
-    - Good examples: "Kai Is COOKED 💀", "Wait For It... 🤯", "Bro SNAPPED 😤🔥", "He Really Did That 😂"
-    - Bad examples: "Kai Cenat Makes His Cameraman Work Out and Gets Impressed By the Results" (too long, explains everything)
+VIRAL STORY ARC & PAYOFF RULE (CRITICAL PSYCHOLOGY):
+14. Every clip MUST follow the 3-stage Viral Storytelling Arc ("Hook → Curiosity/Promise → Complete Payoff"):
+    - STAGE 1: HOOK (0–3s) — Immediate attention-grabbing statement or action.
+    - STAGE 2: CURIOSITY GAP & PROMISE (3–15s) — Builds suspense, tension, or expectation so the viewer MUST keep watching to see what happens.
+    - STAGE 3: COMPLETE PAYOFF & DELIVER (Final seconds) — The clip MUST include the full resolution, punchline, reaction, or outcome of the moment.
+    - NEVER cut off a clip right before the punchline or reaction finishes! The viewer MUST feel 100% satisfied by the end of the clip. Ensure `end` timestamp includes the entire final reaction or sentence.
 
 Return ONLY a valid JSON array with exactly {top_n} objects. No markdown, no explanation, just raw JSON.
 
@@ -253,6 +253,34 @@ async def score_moments(
     if last_exc is not None:
         raise PipelineError("score", f"LLM scoring failed after retries: {last_exc}")
     return _generate_fallback_moments(segments, top_n, display_streamer)
+
+
+def verify_and_clean_visual_moments(moments: list[Moment], video_path: Path | str | None = None) -> list[Moment]:
+    """
+    Inspect candidate moments using OpenCV keyframe scanner.
+    If a moment contains an ugly YouTube 'SUBSCRIBE' banner or end-screen pop-up,
+    automatically shift start timestamp or adjust window to keep footage clean.
+    """
+    if not video_path or not Path(video_path).exists():
+        return moments
+
+    try:
+        from .crop import analyze_keyframe_visuals
+        cleaned = []
+        for m in moments:
+            has_overlay, motion = analyze_keyframe_visuals(Path(video_path), m.start)
+            if has_overlay:
+                logger.info(
+                    "  Moment %02d (%.1fs) detected YouTube Subscribe banner overlay — shifting start +4s for clean footage",
+                    m.index, m.start,
+                )
+                m.start += 4.0  # Shift past the Subscribe popup banner
+                m.end = max(m.start + 15.0, m.end + 2.0)
+            cleaned.append(m)
+        return cleaned
+    except Exception as exc:
+        logger.warning("Visual keyframe overlay check skipped: %s", exc)
+        return moments
 
 
 def _generate_fallback_moments(segments: list[dict], top_n: int = 10, streamer: str = "Streamer") -> list[Moment]:

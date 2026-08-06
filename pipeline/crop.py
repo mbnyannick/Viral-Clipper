@@ -28,6 +28,85 @@ except Exception as e:
     logger.warning("MediaPipe Face Mesh not available (%s), using OpenCV HAAR face tracking fallback.", e)
 
 
+def detect_subscribe_overlay(frame_bgr) -> bool:
+    """
+    Detect on-screen YouTube 'SUBSCRIBE' badges, red popup banners, or end-screen cards
+    in the lower 35% of the frame.
+    Returns True if a prominent red Subscribe button/overlay is present.
+    """
+    if frame_bgr is None or frame_bgr.size == 0:
+        return False
+
+    h, w = frame_bgr.shape[:2]
+    # Inspect lower 35% of frame where Subscribe badges & pop-ups appear
+    lower_third = frame_bgr[int(h * 0.65):, :]
+    if lower_third.size == 0:
+        return False
+
+    hsv = cv2.cvtColor(lower_third, cv2.COLOR_BGR2HSV)
+    # Bright YouTube red range (Hue 0-10 & 170-180, high Saturation > 120, Value > 100)
+    mask1 = cv2.inRange(hsv, (0, 130, 110), (10, 255, 255))
+    mask2 = cv2.inRange(hsv, (170, 130, 110), (180, 255, 255))
+    red_mask = cv2.bitwise_or(mask1, mask2)
+
+    red_pixel_ratio = cv2.countNonZero(red_mask) / float(lower_third.shape[0] * lower_third.shape[1])
+
+    # Check for compact rectangular red button contours (e.g. YouTube Subscribe pill/box)
+    contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    has_button_shape = False
+    for c in contours:
+        area = cv2.contourArea(c)
+        if area > (w * h * 0.005):  # Button takes at least 0.5% of lower frame area
+            x, y, bw, bh = cv2.boundingRect(c)
+            aspect_ratio = bw / float(bh) if bh > 0 else 0
+            if 1.8 <= aspect_ratio <= 6.0:  # Wide rectangular button shape
+                has_button_shape = True
+                break
+
+    return red_pixel_ratio > 0.025 or has_button_shape
+
+
+def analyze_keyframe_visuals(clip_path: Path, timestamp: float) -> tuple[bool, float]:
+    """
+    Sample 3 keyframes near `timestamp` to check for ugly Subscribe overlays & compute visual motion score.
+    Returns (has_subscribe_overlay: bool, motion_energy: float).
+    Takes <0.2s total!
+    """
+    cap = cv2.VideoCapture(str(clip_path))
+    if not cap.isOpened():
+        return False, 50.0
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    has_overlay = False
+    prev_gray = None
+    motion_diffs = []
+
+    # Check 3 quick sample frames: start (t+0.5s), mid (t+2.0s), end (t+4.0s)
+    offsets = [0.5, 2.0, 4.0]
+    for off in offsets:
+        frame_num = int((timestamp + off) * fps)
+        if 0 <= frame_num < total_frames:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                if detect_subscribe_overlay(frame):
+                    has_overlay = True
+
+                # Calculate frame motion delta
+                small = cv2.resize(frame, (320, 180))
+                gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+                if prev_gray is not None:
+                    diff = cv2.absdiff(gray, prev_gray)
+                    motion_diffs.append(float(diff.mean()))
+                prev_gray = gray
+
+    cap.release()
+    avg_motion = sum(motion_diffs) / len(motion_diffs) if motion_diffs else 30.0
+    return has_overlay, round(avg_motion, 1)
+
+
 async def detect_crop_offset(clip_path: Path) -> str:
     """
     Locate active speakers using 3D Face Mesh and return an optimized,

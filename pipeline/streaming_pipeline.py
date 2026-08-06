@@ -35,7 +35,7 @@ from pipeline.caption import render_captions
 from pipeline.composite import composite_clips
 from pipeline.download import extract_metadata, _get_cookie_opts, download_video_clip_range, YT_CLIENT_CHAINS, _kick_vod_get_hls_url
 from pipeline.errors import PipelineError
-from pipeline.score import Moment, score_moments, _generate_fallback_moments
+from pipeline.score import Moment, score_moments, _generate_fallback_moments, verify_and_clean_visual_moments
 from pipeline.subtitle import mask_profanity
 
 logger = logging.getLogger(__name__)
@@ -596,6 +596,9 @@ async def _scan_and_score_window(
 
     if not moments:
         moments = _generate_fallback_moments(segments, top_n=1, streamer=streamer)
+
+    # ── 3.5 Visual Overlay & Subscribe-Button Avoidance Scan ────────────────────
+    moments = verify_and_clean_visual_moments(moments, video_path=audio_path)
 
     tracker.analyzed += 1  # 🧠 Analyzed counter
 
