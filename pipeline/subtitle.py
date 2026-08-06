@@ -142,8 +142,9 @@ def build_word_subtitle_filter(
     time_offset: float = 0.0,
 ) -> tuple[str | None, str | None]:
     """
-    Build high-impact 9x16 vertical social subtitle filter.
+    Subtitles completely disabled per user request until new subtitle engine is installed.
     """
+    return None, None
     speed_factor = 1.00
     words: list[dict] = []
     for seg in segments:
