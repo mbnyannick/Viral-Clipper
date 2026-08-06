@@ -190,23 +190,57 @@ async def transcribe_chunks(
 
     # Fallback / Primary try: Groq Whisper API
     if groq_key:
-        logger.info("Submitting %d chunks to Groq Whisper Large v3 Turbo concurrently", len(chunks))
-        sem = asyncio.Semaphore(20)
-        async with httpx.AsyncClient() as client:
-            async def _bounded_groq(path: Path, offset: float) -> list[dict]:
-                async with sem:
-                    return await _transcribe_groq_one(client, groq_key, path, offset, max_retries=3)
+        try:
+            logger.info("Submitting %d chunks to Groq Whisper Large v3 Turbo concurrently", len(chunks))
+            sem = asyncio.Semaphore(20)
+            async with httpx.AsyncClient() as client:
+                async def _bounded_groq(path: Path, offset: float) -> list[dict]:
+                    async with sem:
+                        return await _transcribe_groq_one(client, groq_key, path, offset, max_retries=2)
 
-            results = await asyncio.gather(*(_bounded_groq(p, o) for p, o in chunks))
+                results = await asyncio.gather(*(_bounded_groq(p, o) for p, o in chunks))
 
+            merged = []
+            for sl in results:
+                merged.extend(sl)
+
+            if merged:
+                logger.info("Groq Whisper transcription complete — %d segments total", len(merged))
+                return merged
+        except Exception as groq_exc:
+            logger.warning("Groq Whisper transcription failed (%s) — falling back to local Whisper...", groq_exc)
+
+    # 3. Local OpenAI Whisper fallback (100% offline & reliable)
+    try:
+        logger.info("Running local OpenAI Whisper fallback for %d chunks...", len(chunks))
+        import whisper
+        model = whisper.load_model("tiny")
         merged = []
-        for sl in results:
-            merged.extend(sl)
-
+        for path, offset in chunks:
+            res = await asyncio.to_thread(model.transcribe, str(path), word_timestamps=True)
+            for seg in res.get("segments", []):
+                s_start = round(seg.get("start", 0.0) + offset, 3)
+                s_end = round(seg.get("end", 0.0) + offset, 3)
+                s_words = []
+                for w in seg.get("words", []):
+                    s_words.append({
+                        "word": w.get("word", "").strip(),
+                        "start": round(w.get("start", 0.0) + offset, 3),
+                        "end": round(w.get("end", 0.0) + offset, 3),
+                        "confidence": 0.95,
+                    })
+                merged.append({
+                    "text": seg.get("text", "").strip(),
+                    "start": s_start,
+                    "end": s_end,
+                    "words": s_words,
+                })
         if merged:
-            logger.info("Groq Whisper transcription complete — %d segments total", len(merged))
+            logger.info("Local Whisper fallback transcription complete — %d segments total", len(merged))
             return merged
+    except Exception as whisper_exc:
+        logger.warning("Local Whisper fallback failed: %s", whisper_exc)
 
-    raise PipelineError("transcribe", "All transcription services failed (Deepgram / Groq Whisper).")
+    raise PipelineError("transcribe", "All transcription services failed (Deepgram / Groq Whisper / Local Whisper).")
 
 

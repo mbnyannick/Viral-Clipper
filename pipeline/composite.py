@@ -200,16 +200,16 @@ async def _composite_one(
     norm_wm_path = output_dir / f"wm_norm_{moment.index:02d}.png"
     _, wm_w, wm_h = prepare_watermark(watermark_path, norm_wm_path)
 
-    is_square = layout_mode != "face_crop"
+    is_square = False
     if layout_mode == "face_crop":
         video_top_y = 0
         scaled_h = CANVAS_H
-        crop_filter_str = ""
+        crop_filter_str = "crop=ih*9/16:ih:(iw-ih*9/16)/2:0"
     else:
-        # Standard 1:1 Square Ratio Baseline for BLUR, BLACK, and pillarbox modes
-        scaled_h = CANVAS_W  # 720px height for 1:1 (720x720 video centered vertically)
-        video_top_y = (CANVAS_H - CANVAS_W) // 2  # 280px top position
-        crop_filter_str = _get_1_1_crop_filter()
+        # Standard 4:3 Ratio Baseline for BLUR, BLACK, and pillarbox modes (720x540 centered in 720x1280 vertical canvas)
+        scaled_h = int(CANVAS_W * 3 / 4)  # 540px height for 4:3 video
+        video_top_y = (CANVAS_H - scaled_h) // 2  # 370px top position
+        crop_filter_str = _get_4_3_crop_filter()
 
     video_bottom_y = video_top_y + scaled_h
 
@@ -277,7 +277,20 @@ async def _composite_one(
     if bgm_file:
         logger.info("  Using BGM track (%s mood): %s", mood, bgm_file.name)
 
-    # ── 3. Build Video Filtergraph per Layout Mode ─────────────────────────────
+    # ── 2.5. Word-by-word Subtitle Generation ─────────────────────────────────
+    sub_file = None
+    if enable_subtitles and segments:
+        try:
+            from .subtitle import build_word_subtitle_filter
+            sub_file, _ = build_word_subtitle_filter(
+                segments=segments,
+                clip_start=moment.start,
+                clip_end=moment.end,
+                canvas_w=CANVAS_W,
+                canvas_h=CANVAS_H,
+            )
+        except Exception as sub_exc:
+            logger.warning("Subtitle generation exception: %s", sub_exc)
     if layout_mode == "face_crop":
         crop_filter = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale={CANVAS_W}:{CANVAS_H}:flags=lanczos"
         logger.info(

@@ -49,20 +49,12 @@ def _make_layout_keyboard(target_duration: str = "auto") -> InlineKeyboardMarkup
             InlineKeyboardButton("👤 Face Tracking (9:16 Fullscreen)", callback_data="fmt:face_crop"),
         ],
         [
-            InlineKeyboardButton("🔲 1:1 Square (Blurred BG)", callback_data="fmt:square_blur"),
-            InlineKeyboardButton("🖤 1:1 Square (Black)", callback_data="fmt:square_black"),
-            InlineKeyboardButton("🩷 1:1 Square (Pink)", callback_data="fmt:square_pink"),
+            InlineKeyboardButton("🎬 9:16 Vertical (Blurred BG)", callback_data="fmt:blurred_frame"),
+            InlineKeyboardButton("🖤 9:16 Vertical (Black Canvas)", callback_data="fmt:black_canvas"),
         ],
         [
-            InlineKeyboardButton("🎬 1:1 Square (Blurred BG)", callback_data="fmt:blurred_frame"),
-            InlineKeyboardButton("🖤 1:1 Square (Black)", callback_data="fmt:black_canvas"),
-            InlineKeyboardButton("🩷 1:1 Square (Pink)", callback_data="fmt:pink_canvas"),
-        ],
-        [
-            InlineKeyboardButton("🔴 1:1 Red", callback_data="fmt:square_red"),
-            InlineKeyboardButton("🔵 1:1 Blue", callback_data="fmt:square_blue"),
-            InlineKeyboardButton("🟣 1:1 Purple", callback_data="fmt:square_purple"),
-            InlineKeyboardButton("🩶 1:1 Grey", callback_data="fmt:square_grey"),
+            InlineKeyboardButton("🔲 9:16 Vertical (Square Blur)", callback_data="fmt:square_blur"),
+            InlineKeyboardButton("🩷 9:16 Vertical (Pink Canvas)", callback_data="fmt:pink_canvas"),
         ],
         [
             InlineKeyboardButton("❌ Cancel", callback_data="wiz:cancel"),
