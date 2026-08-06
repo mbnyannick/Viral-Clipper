@@ -332,11 +332,11 @@ def build_aura_keyword_filter(
     if t_end <= t_start:
         t_end = t_start + hold_duration
 
-    # Font sizing — massive, ~22% of canvas height
-    font_size = max(80, int(canvas_h * 0.095))
+    # Sleek, high-impact font sizing — ~5% of canvas width (52px @ 1080p, sleek & non-obtrusive)
+    font_size = max(42, int(canvas_w * 0.048))
 
-    # Vertical center position (slightly above center for visual pop)
-    y_pos = int(canvas_h * 0.40)
+    # Upper 26% vertical position (comfortably above video frame, zero screen overlap)
+    y_pos = int(canvas_h * 0.26)
 
     # Font resolution — use bundled bold font if available
     font_file_filter = ""

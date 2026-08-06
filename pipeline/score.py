@@ -99,12 +99,11 @@ CAPTION FORMAT:
 10. 100% UNIQUE PHRASING — no repeated words, hooks, or sentence structure across any clip in this batch.
 11. DO NOT put the emoji inside caption_lines — it belongs in the "emoji" field only.
 
-AURA KEYWORD RULE (CRITICAL):
-12. For EVERY clip, pick ONE single uppercase word that perfectly captures the energy and vibe of this specific moment. This word will flash HUGE on screen like a meme caption.
+AURA KEYWORD RULE (100% CONTEXTUALLY RELEVANT):
+12. For EVERY clip, pick ONE single uppercase word that directly relates to what is happening in THIS SPECIFIC moment.
     - It MUST be a single word (no spaces, no punctuation)
-    - It MUST be ALL CAPS (e.g. COOKED, AURA, IMPRESSED, CAUGHT, EXPOSED, REAL, DEAD, CLAPPED, WHO, NOPE, WAIT, WILD)
-    - Choose the word that would make someone STOP scrolling if they saw it flash on screen
-    - Match the energy: use COOKED/DONE for fails, AURA/REAL for swag moments, IMPRESSED/SHOCKED for reactions, CAUGHT/EXPOSED for drama, DEAD/CRYING for comedy
+    - It MUST be ALL CAPS (e.g. PRANK, SPOTTED, KNOCKOUT, RECOGNIZED, BUSTED, ROASTED, EXPOSED, SHOCKED)
+    - CRITICAL: Do NOT pick generic random words like "AURA" or "WHO". The word MUST be 100% derived from the actual clip action/topic (e.g., if it's a boxer prank, use `PRANK` or `BOXER`; if a fan recognizes the streamer, use `SPOTTED` or `CAUGHT`; if an insult occurs, use `ROASTED`).
 
 VIRAL STORY ARC & PAYOFF RULE (CRITICAL PSYCHOLOGY):
 14. Every clip MUST follow the 3-stage Viral Storytelling Arc ("Hook → Curiosity/Promise → Complete Payoff"):
