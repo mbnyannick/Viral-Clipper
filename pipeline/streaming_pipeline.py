@@ -36,7 +36,7 @@ from pipeline.composite import composite_clips
 from pipeline.download import extract_metadata, _get_cookie_opts, download_video_clip_range, YT_CLIENT_CHAINS, _kick_vod_get_hls_url
 from pipeline.errors import PipelineError
 from pipeline.score import Moment, score_moments, _generate_fallback_moments, verify_and_clean_visual_moments
-from pipeline.subtitle import mask_profanity
+from pipeline.text_utils import mask_profanity
 
 logger = logging.getLogger(__name__)
 

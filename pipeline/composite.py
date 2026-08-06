@@ -4,8 +4,8 @@ Step 7 — Compositing.
 Assembles the final 1080×1920 vertical clip for each moment.
 
 Supports two layout modes:
-1. "pillarbox" (default): Video scaled to 1080 wide, centered with white top/bottom space.
-   Caption sits in the top white space above the video.
+1. "pillarbox" / square backgrounds: Video is center-cropped to 1:1 and placed in the vertical 9:16 canvas.
+   Caption sits in the top card area while the main video is centered in the square frame.
 2. "face_crop": OpenCV face detection crops 16:9 video to full 9:16 vertical on speaker.
    Caption sits overlaid at lower 68% position.
 """
@@ -20,7 +20,6 @@ from pathlib import Path
 from .crop import detect_crop_offset
 from .errors import PipelineError
 from .score import Moment
-from .subtitle import build_word_subtitle_filter, build_aura_keyword_filter
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +187,6 @@ async def _composite_one(
     output_dir: Path,
     layout_mode: str = "pillarbox",
     enable_silence_cut: bool = True,
-    enable_subtitles: bool = True,
     segments: list[dict] | None = None,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -281,30 +279,10 @@ async def _composite_one(
     if layout_mode == "face_crop":
         crop_filter = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale={CANVAS_W}:{CANVAS_H}:flags=lanczos"
         logger.info(
-            "  Compositing clip %02d (face_crop clean full screen, wm_y=%d, sub=%s)",
-            moment.index, wm_y, enable_subtitles,
+            "  Compositing clip %02d (face_crop clean full screen, wm_y=%d)",
+            moment.index, wm_y,
         )
-        sub_filter = ""
-        punch_in_expr = None
-        if enable_subtitles and segments:
-            sf, p_expr = build_word_subtitle_filter(segments, moment.start, moment.end, canvas_w=CANVAS_W, wm_y=wm_y, canvas_h=CANVAS_H, time_offset=vo_dur)
-            if sf:
-                sub_filter = f"subtitles=filename='{sf}':fontsdir='assets/fonts'"
-            punch_in_expr = p_expr
-
-        # Build aura keyword overlay (*WORD* flash at peak moment)
-        aura_word = getattr(moment, "aura_word", "")
-        clip_dur = moment.end - moment.start + vo_dur
-        aura_filter = build_aura_keyword_filter(aura_word, clip_dur, canvas_w=CANVAS_W, canvas_h=CANVAS_H) if aura_word else None
-
-        if sub_filter and aura_filter:
-            sub_stage = f"[out2]{sub_filter}[sub_out];[sub_out]{aura_filter}[out]"
-        elif sub_filter:
-            sub_stage = f"[out2]{sub_filter}[out]"
-        elif aura_filter:
-            sub_stage = f"[out2]{aura_filter}[out]"
-        else:
-            sub_stage = "[out2]null[out]"
+        sub_stage = "[out2]null[out]"
 
         if vo_dur > 0:
             concat_v = (
@@ -327,25 +305,7 @@ async def _composite_one(
             "  Compositing clip %02d (%s 720x1280, crop=%s, wm_y=%d)",
             moment.index, layout_mode, "1:1" if is_square else "4:3", wm_y,
         )
-        sub_filter = ""
-        if enable_subtitles and segments:
-            sf, _ = build_word_subtitle_filter(segments, moment.start, moment.end, canvas_w=CANVAS_W, wm_y=wm_y, canvas_h=CANVAS_H, time_offset=vo_dur)
-            if sf:
-                sub_filter = f"subtitles=filename='{sf}':fontsdir='assets/fonts'"
-
-        # Build aura keyword overlay (*WORD* flash at peak moment)
-        aura_word = getattr(moment, "aura_word", "")
-        clip_dur = moment.end - moment.start + vo_dur
-        aura_filter = build_aura_keyword_filter(aura_word, clip_dur, canvas_w=CANVAS_W, canvas_h=CANVAS_H) if aura_word else None
-
-        if sub_filter and aura_filter:
-            sub_stage = f"[out2]{sub_filter}[sub_out];[sub_out]{aura_filter}[out]"
-        elif sub_filter:
-            sub_stage = f"[out2]{sub_filter}[out]"
-        elif aura_filter:
-            sub_stage = f"[out2]{aura_filter}[out]"
-        else:
-            sub_stage = "[out2]null[out]"
+        sub_stage = "[out2]null[out]"
 
         # Silky smooth HD background blur + Lanczos sharp main video scaling
         if vo_dur > 0:
@@ -384,25 +344,7 @@ async def _composite_one(
             bg_color = "#1a1a1a"
 
         bg_color_pad = bg_color.replace("#", "0x")
-        sub_filter = ""
-        if enable_subtitles and segments:
-            sf, _ = build_word_subtitle_filter(segments, moment.start, moment.end, canvas_w=CANVAS_W, wm_y=wm_y, canvas_h=CANVAS_H, time_offset=vo_dur)
-            if sf:
-                sub_filter = f"subtitles=filename='{sf}':fontsdir='assets/fonts'"
-
-        # Build aura keyword overlay (*WORD* flash at peak moment)
-        aura_word = getattr(moment, "aura_word", "")
-        clip_dur = moment.end - moment.start + vo_dur
-        aura_filter = build_aura_keyword_filter(aura_word, clip_dur, canvas_w=CANVAS_W, canvas_h=CANVAS_H) if aura_word else None
-
-        if sub_filter and aura_filter:
-            sub_stage = f"[out2]{sub_filter}[sub_out];[sub_out]{aura_filter}[out]"
-        elif sub_filter:
-            sub_stage = f"[out2]{sub_filter}[out]"
-        elif aura_filter:
-            sub_stage = f"[out2]{aura_filter}[out]"
-        else:
-            sub_stage = "[out2]null[out]"
+        sub_stage = "[out2]null[out]"
 
         if vo_dur > 0:
             concat_v = (
@@ -584,7 +526,6 @@ async def composite_clips(
     output_dir: Path,
     layout_mode: str = "pillarbox",
     enable_silence_cut: bool = True,
-    enable_subtitles: bool = True,
     segments: list[dict] | None = None,
     on_clip_ready: typing.Callable | None = None,
 ) -> list[Path]:
@@ -604,7 +545,6 @@ async def composite_clips(
                     output_dir,
                     layout_mode=layout_mode,
                     enable_silence_cut=enable_silence_cut,
-                    enable_subtitles=enable_subtitles,
                     segments=segments,
                 )
             except Exception as exc:

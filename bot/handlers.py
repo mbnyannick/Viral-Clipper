@@ -52,9 +52,9 @@ def _make_layout_keyboard(target_duration: str = "auto") -> InlineKeyboardMarkup
             InlineKeyboardButton("🩷 1:1 Square (Pink)", callback_data="fmt:square_pink"),
         ],
         [
-            InlineKeyboardButton("🎬 4:3 (Blurred BG)", callback_data="fmt:blurred_frame"),
-            InlineKeyboardButton("🖤 4:3 (Black)", callback_data="fmt:black_canvas"),
-            InlineKeyboardButton("🩷 4:3 (Pink)", callback_data="fmt:pink_canvas"),
+            InlineKeyboardButton("🎬 1:1 Square (Blurred BG)", callback_data="fmt:blurred_frame"),
+            InlineKeyboardButton("🖤 1:1 Square (Black)", callback_data="fmt:black_canvas"),
+            InlineKeyboardButton("🩷 1:1 Square (Pink)", callback_data="fmt:pink_canvas"),
         ],
         [
             InlineKeyboardButton("🔴 1:1 Red", callback_data="fmt:square_red"),
@@ -354,12 +354,12 @@ async def _launch_job(chat_id: int, num_clips: int, target_duration: str = "auto
     dur_label = dur_map.get(target_duration, "⚡ Automatic (25–60s)")
 
     mode_map = {
-        "black_canvas": "🖤 Black Canvas (4:3)",
-        "blurred_frame": "🎬 Blurred BG (4:3)",
-        "pink_canvas": "🩷 Pink Canvas (4:3)",
-        "red_canvas": "🔴 Red Canvas (4:3)",
-        "blue_canvas": "🔵 Blue Canvas (4:3)",
-        "purple_canvas": "🟣 Purple Canvas (4:3)",
+        "black_canvas": "🖤 1:1 Square (Black Canvas)",
+        "blurred_frame": "🎬 1:1 Square (Blurred BG)",
+        "pink_canvas": "🩷 1:1 Square (Pink Canvas)",
+        "red_canvas": "🔴 1:1 Square (Red Canvas)",
+        "blue_canvas": "🔵 1:1 Square (Blue Canvas)",
+        "purple_canvas": "🟣 1:1 Square (Purple Canvas)",
         "square_blur": "🔲 1:1 Square (Blurred BG)",
         "square_pink": "🩷 1:1 Square (Pink Canvas)",
         "square_black": "🖤 1:1 Square (Black Canvas)",

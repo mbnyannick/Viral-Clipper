@@ -1,13 +1,9 @@
 """
 Step 6 — Caption image rendering.
 
-ALL layouts (including face_crop):
-  Full-canvas (720×1280) transparent PNG.
-  ONE single white rounded-rectangle containing all caption lines,
-  overlaid ON the video footage.
-  Bold black text, each line centered horizontally inside the box.
-  Color emojis rendered cleanly using NotoColorEmoji.
-  Box fits tightly around text and sits just above the top of the video frame.
+Renders the DeepSeek hook text as a white rounded card with centered lines.
+All-caps words remain uppercase and are drawn in bold for emphasis.
+Emoji is appended to the last line for hook-style punctuation.
 """
 
 import logging
@@ -19,33 +15,25 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .errors import PipelineError
 from .score import Moment
-from .subtitle import mask_profanity
+from .text_utils import mask_profanity
 
 logger = logging.getLogger(__name__)
 
-# ── 720p HD Canvas Scaling (720×1280) ──────────────────────────────────────────
 CANVAS_W: int = 720
 CANVAS_H: int = 1280
 
-# 4:3 video zone on 720×1280 (video = 720×540, centered)
-_VIDEO_TOP_Y: int = (CANVAS_H - CANVAS_W * 3 // 4) // 2   # = 370
-_VIDEO_BOT_Y: int = _VIDEO_TOP_Y + CANVAS_W * 3 // 4       # = 910
-
-# ── Typography & 720p Scaling ────────────────────────────────────────────────
-FONT_SIZE: int   = 32        # Clean, highly readable 720p font size
-LINE_GAP: int    = 8
-WORD_GAP: int    = 8
-
-# ── Box style (720p HD rounded white card) ──────────────────────────────────
-BOX_BG       = (255, 255, 255, 255)  # crisp pure white
-BOX_RADIUS   = 16                    # smooth 16px rounded corners
-BOX_PAD_X    = 24                    # spacious side padding
-BOX_PAD_Y    = 14                    # top/bottom padding
-TEXT_COLOR   = (15, 15, 15)          # bold dark text
-
-# ── Box center positions ──────────────────────────────────────────────────────
-_BOX_CENTER_PILLARBOX: int = 280
-_BOX_CENTER_FACECROP: int  = 140
+MAIN_FONT_SIZE = 66
+SECONDARY_FONT_SIZE = 56
+LINE_GAP = 12
+MAX_LINES = 2
+TEXT_COLOR = (20, 20, 20, 255)
+BOX_COLOR = (255, 255, 255, 255)
+BOX_RADIUS = 28
+BOX_PAD_X = 32
+BOX_PAD_Y = 26
+SHADOW_COLOR = (0, 0, 0, 115)
+EMOJI_SIZE = 70
+WORD_SPACING = 10
 
 _SYSTEM_EMOJI_PATHS = [
     "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
@@ -57,9 +45,9 @@ _SYSTEM_EMOJI_PATHS = [
 _EMOJI_CACHE: dict[tuple[str, int], Image.Image] = {}
 
 
-def _is_emphasis(word: str) -> bool:
-    clean = word.strip(".,!?\"'")
-    return bool(clean) and clean.isupper() and len(clean) > 1 and any(c.isalpha() for c in clean)
+def _clean_caption_text(text: str) -> str:
+    clean = re.sub(r"[☰≡•|~]", "", text)
+    return mask_profanity(clean.strip())
 
 
 def _find_emoji_font(assets_dir: Path) -> str | None:
@@ -72,6 +60,49 @@ def _find_emoji_font(assets_dir: Path) -> str | None:
     return None
 
 
+def _load_font_paths(assets_dir: Path) -> tuple[str, str, str | None]:
+    inter_bold = assets_dir / "fonts" / "Inter-Bold.ttf"
+    bold_otf = assets_dir / "fonts" / "Bold.otf"
+    bold_ttf = assets_dir / "fonts" / "Bold.ttf"
+    medium_otf = assets_dir / "fonts" / "Medium.otf"
+
+    bold_path = inter_bold if inter_bold.exists() else (bold_otf if bold_otf.exists() else bold_ttf)
+    normal_path = medium_otf if medium_otf.exists() else bold_path
+
+    if not Path(bold_path).exists():
+        raise FileNotFoundError(f"Font file missing at {bold_path}")
+
+    return str(bold_path), str(normal_path), _find_emoji_font(assets_dir)
+
+
+def _is_emphasis(word: str) -> bool:
+    clean = word.strip(".,!?\"'")
+    return bool(clean) and clean.isupper() and len(clean) > 1 and any(c.isalpha() for c in clean)
+
+
+def _measure_text_width(text: str, font: ImageFont.FreeTypeFont) -> int:
+    bbox = font.getbbox(text)
+    return bbox[2] - bbox[0]
+
+
+def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+    words = text.split()
+    if not words:
+        return []
+
+    lines = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if _measure_text_width(candidate, font) <= max_width:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
 def _get_emoji_image(emoji_char: str, size: int, assets_dir: Path) -> Image.Image | None:
     key = (emoji_char, size)
     if key in _EMOJI_CACHE:
@@ -82,8 +113,8 @@ def _get_emoji_image(emoji_char: str, size: int, assets_dir: Path) -> Image.Imag
         return None
 
     try:
-        f = ImageFont.truetype(emoji_font_path, 109, index=0)
-        temp_img = Image.new("RGBA", (200, 200), (0, 0, 0, 0))
+        f = ImageFont.truetype(emoji_font_path, 120, index=0)
+        temp_img = Image.new("RGBA", (240, 240), (0, 0, 0, 0))
         d = ImageDraw.Draw(temp_img)
         d.text((10, 10), emoji_char, font=f, embedded_color=True)
         bbox = temp_img.getbbox()
@@ -99,146 +130,85 @@ def _get_emoji_image(emoji_char: str, size: int, assets_dir: Path) -> Image.Imag
     return None
 
 
-def _load_fonts(
-    assets_dir: Path,
-    font_size: int,
-) -> tuple[ImageFont.FreeTypeFont, ImageFont.FreeTypeFont, str | None]:
-    inter_bold = assets_dir / "fonts" / "Inter-Bold.ttf"
-    bold_otf   = assets_dir / "fonts" / "Bold.otf"
-    bold_ttf   = assets_dir / "fonts" / "Bold.ttf"
-    medium_otf = assets_dir / "fonts" / "Medium.otf"
-
-    bold_path   = inter_bold if inter_bold.exists() else (bold_otf if bold_otf.exists() else bold_ttf)
-    medium_path = medium_otf if medium_otf.exists() else bold_path
-
-    if not bold_path.exists():
-        raise FileNotFoundError(f"Font file missing at {bold_path}")
-
-    normal_font   = ImageFont.truetype(str(medium_path), font_size)
-    emphasis_font = ImageFont.truetype(str(bold_path),   font_size)
-    emoji_path    = _find_emoji_font(assets_dir)
-
-    return normal_font, emphasis_font, emoji_path
-
-
-def _tok_w(text: str, font: ImageFont.FreeTypeFont, is_emoji: bool = False, assets_dir: Path | None = None) -> int:
-    if is_emoji and assets_dir:
-        em_img = _get_emoji_image(text, FONT_SIZE, assets_dir)
-        if em_img:
-            return em_img.width
-        return FONT_SIZE
-    try:
-        bb = font.getbbox(text)
-        return bb[2] - bb[0]
-    except Exception:
-        return 30
-
-
-def _build_line_tokens(
-    line_text: str,
-    normal_f: ImageFont.FreeTypeFont,
-    emph_f:   ImageFont.FreeTypeFont,
-) -> list[tuple]:
-    """Word tokens for one line. Normal words are lowercase (normal font), emphasis words are ALL CAPS & BOLD."""
+def _build_tokens(line_text: str, normal_f: ImageFont.FreeTypeFont, bold_f: ImageFont.FreeTypeFont) -> list[tuple[str, ImageFont.FreeTypeFont]]:
     tokens = []
     for w in line_text.split():
-        clean_w = w.strip()
-        if not clean_w:
+        clean_word = w.strip()
+        if not clean_word:
             continue
-        if _is_emphasis(clean_w):
-            # Emphasis keyword — keep ALL CAPS and use bold font
-            tokens.append((clean_w, emph_f, False))
+        if _is_emphasis(clean_word):
+            tokens.append((clean_word, bold_f))
         else:
-            # Normal word — convert to lowercase for clean casual aesthetic (matches reference screenshot)
-            tokens.append((clean_w.lower(), normal_f, False))
+            tokens.append((clean_word, normal_f))
     return tokens
 
 
-def _clean_caption_text(text: str) -> str:
-    """Filter out weird non-standard menu symbols like ☰ ≡ • ~ | and sanitize profanity."""
-    clean = re.sub(r"[☰≡•|~]", "", text)
-    return mask_profanity(clean.strip())
+def _draw_white_card(img: Image.Image, lines: list[str], emoji_str: str | None, assets_dir: Path) -> None:
+    bold_path, normal_path, _ = _load_font_paths(assets_dir)
+    normal_f = ImageFont.truetype(normal_path, SECONDARY_FONT_SIZE)
+    bold_f = ImageFont.truetype(bold_path, SECONDARY_FONT_SIZE)
+    headline_f = ImageFont.truetype(bold_path, MAIN_FONT_SIZE)
 
+    lines = [ln for ln in lines if ln.strip()][:MAX_LINES]
+    if len(lines) == 3:
+        lines = [lines[0], f"{lines[1]} {lines[2]}".strip()]
 
-def _draw_white_card(
-    img: Image.Image,
-    line_token_rows: list[list[tuple]],
-    emoji_str: str | None,
-    normal_f: ImageFont.FreeTypeFont,
-    assets_dir: Path,
-    box_center_y: int,
-    layout_mode: str = "pillarbox",
-    custom_video_top_y: int = _VIDEO_TOP_Y,
-) -> None:
-    """Render ONE white rounded-rect card containing all lines onto *img*."""
+    if emoji_str and lines:
+        lines[-1] = f"{lines[-1].strip()} {emoji_str.strip()}"
 
-    # ── Measure row widths (emojis appended individually to last row) ───────
-    rows = [list(row) for row in line_token_rows]  # copy
-    if emoji_str and rows:
-        emoji_chars = [c for c in emoji_str if not c.isalnum() and not c.isspace()]
-        if not emoji_chars and emoji_str.strip():
-            emoji_chars = [emoji_str.strip()]
-        for em in emoji_chars:
-            rows[-1].append((em, normal_f, True))
+    rows: list[tuple[list[tuple[str, ImageFont.FreeTypeFont]], ImageFont.FreeTypeFont]] = []
+    max_line_width = 0
+    total_text_height = 0
 
-    row_widths = [
-        sum(_tok_w(t, f, ie, assets_dir) for t, f, ie in row) + WORD_GAP * max(0, len(row) - 1)
-        for row in rows
-    ]
-    n_lines    = len(rows)
-    max_row_w  = max(row_widths) if row_widths else 0
+    for idx, line in enumerate(lines):
+        font = headline_f if idx == 0 else normal_f
+        wrapped = _wrap_text(line, font, CANVAS_W - BOX_PAD_X * 2)
+        for subline in wrapped:
+            tokens = _build_tokens(subline, normal_f, bold_f)
+            if not tokens:
+                continue
+            line_width = sum(_measure_text_width(text, f) for text, f in tokens) + WORD_SPACING * max(0, len(tokens) - 1)
+            max_line_width = max(max_line_width, line_width)
+            rows.append((tokens, font))
+            total_text_height += font.getbbox("Ay")[3] - font.getbbox("Ay")[1]
 
-    # ── Box geometry (Yesterday's exact rounded white card layout) ─────────────
-    box_inner_w = max_row_w
-    box_inner_h = FONT_SIZE * n_lines + LINE_GAP * max(0, n_lines - 1)
+    if not rows:
+        return
 
-    box_w = min(CANVAS_W - 48, max(420, box_inner_w + BOX_PAD_X * 2))
-    box_inner_w = box_w - BOX_PAD_X * 2
-    box_h = box_inner_h + BOX_PAD_Y * 2
+    total_text_height += LINE_GAP * (len(rows) - 1)
+    box_width = max_line_width + BOX_PAD_X * 2
+    box_height = total_text_height + BOX_PAD_Y * 2
+    box_x = (CANVAS_W - box_width) // 2
+    box_y = 92
 
-    # Centered horizontally, positioned nicely above top of video frame
-    box_x0 = (CANVAS_W - box_w) // 2
-    if layout_mode == "face_crop":
-        box_y0 = box_center_y - box_h // 2
-    else:
-        box_y1 = custom_video_top_y - 12
-        box_y0 = box_y1 - box_h
+    shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_draw.rounded_rectangle(
+        [(box_x + 4, box_y + 4), (box_x + box_width + 4, box_y + box_height + 4)],
+        radius=BOX_RADIUS,
+        fill=SHADOW_COLOR,
+    )
+    img.alpha_composite(shadow)
 
-    box_y0 = max(15, min(box_y0, CANVAS_H - box_h - 20))
-    box_x1 = box_x0 + box_w
-    box_y1 = box_y0 + box_h
-
-    # ── Draw white card ───────────────────────────────────────────────────────
     card = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    cd   = ImageDraw.Draw(card)
-    cd.rounded_rectangle([(box_x0, box_y0), (box_x1, box_y1)], radius=BOX_RADIUS, fill=BOX_BG)
+    card_draw = ImageDraw.Draw(card)
+    card_draw.rounded_rectangle(
+        [(box_x, box_y), (box_x + box_width, box_y + box_height)],
+        radius=BOX_RADIUS,
+        fill=BOX_COLOR,
+    )
     img.alpha_composite(card)
 
-
-    # ── Draw text (justified / centered row by row inside 660px box) ──────────
-    draw   = ImageDraw.Draw(img)
-    text_y = box_y0 + BOX_PAD_Y
-
-    for row, row_w in zip(rows, row_widths):
-        # Center each line horizontally inside the box interior
-        text_x = box_x0 + BOX_PAD_X + (box_inner_w - row_w) // 2
-        cx = text_x
-        for token_text, font, is_emoji in row:
-            tw = _tok_w(token_text, font, is_emoji, assets_dir)
-            ty = text_y
-            if is_emoji:
-                em_img = _get_emoji_image(token_text, FONT_SIZE, assets_dir)
-                if em_img:
-                    img.alpha_composite(em_img, (cx, ty))
-                else:
-                    try:
-                        draw.text((cx, ty), token_text, font=font, fill=TEXT_COLOR)
-                    except Exception:
-                        pass
-            else:
-                draw.text((cx, ty), token_text, font=font, fill=TEXT_COLOR)
-            cx += tw + WORD_GAP
-        text_y += FONT_SIZE + LINE_GAP
+    draw = ImageDraw.Draw(img)
+    y = box_y + BOX_PAD_Y
+    for tokens, font in rows:
+        row_width = sum(_measure_text_width(text, f) for text, f in tokens) + WORD_SPACING * max(0, len(tokens) - 1)
+        x = (CANVAS_W - row_width) // 2
+        line_height = font.getbbox("Ay")[3] - font.getbbox("Ay")[1]
+        for text, font_obj in tokens:
+            draw.text((x, y), text, font=font_obj, fill=TEXT_COLOR)
+            x += _measure_text_width(text, font_obj) + WORD_SPACING
+        y += line_height + LINE_GAP
 
 
 def render_caption(
@@ -251,46 +221,25 @@ def render_caption(
     stroke_width: int | None = None,
     include_emoji: bool | None = None,
 ) -> int:
-    """
-    Render ONE white card PNG (720×1280 transparent canvas) for *moment*.
-    Works for ALL layout modes including face_crop.
-    Returns CANVAS_H always.
-    """
     eff_include_emoji = True if include_emoji is None else include_emoji
 
     try:
-        norm_f, emph_f, _ = _load_fonts(assets_dir, FONT_SIZE)
+        _load_font_paths(assets_dir)
     except FileNotFoundError as exc:
         raise PipelineError("caption", str(exc)) from exc
 
-    # Sanitize lines and clean weird unicode symbols like ☰ ≡ • ~
     raw_lines = [_clean_caption_text(ln) for ln in (moment.caption_lines or [])[:3]]
     raw_lines = [ln for ln in raw_lines if ln.strip()]
-
-
-    # Build token rows
-    line_token_rows = [_build_line_tokens(ln, norm_f, emph_f) for ln in raw_lines]
-    line_token_rows = [r for r in line_token_rows if r]
-
-    # Emoji string for the end of the last line
-    emoji_str: str | None = None
-    if eff_include_emoji and moment.emoji:
-        emoji_str = moment.emoji.strip() or None
-
-    # 1:1 Square baseline position for all layouts (720x720 video centered at y=280px to y=1000px)
-    video_top_y = (CANVAS_H - CANVAS_W) // 2  # = 280px top for 1:1 square video
-    box_center_y = video_top_y - 70
+    emoji_str = moment.emoji.strip() if eff_include_emoji and moment.emoji else None
 
     img = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
-
-    if line_token_rows or emoji_str:
-        _draw_white_card(img, line_token_rows, emoji_str, norm_f, assets_dir, box_center_y, layout_mode=layout_mode, custom_video_top_y=video_top_y)
+    _draw_white_card(img, raw_lines, emoji_str, assets_dir)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(output_path))
     logger.info(
-        "  Caption %02d: %s (white card, %d lines, center_y=%d, mode=%s)",
-        moment.index, output_path.name, len(line_token_rows), box_center_y, layout_mode,
+        "  Caption %02d: %s (white hook card, %d input lines, mode=%s)",
+        moment.index, output_path.name, len(raw_lines), layout_mode,
     )
     return CANVAS_H
 
@@ -301,7 +250,6 @@ def render_captions(
     output_dir: Path,
     layout_mode: str = "pillarbox",
 ) -> list[tuple[Path, int]]:
-    """Render all captions. Returns list of (png_path, height_px) in moment order."""
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[tuple[Path, int]] = []
     for m in moments:
