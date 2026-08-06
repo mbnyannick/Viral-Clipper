@@ -143,7 +143,7 @@ def _build_tokens(line_text: str, normal_f: ImageFont.FreeTypeFont, bold_f: Imag
     return tokens
 
 
-def _draw_white_card(img: Image.Image, lines: list[str], emoji_str: str | None, assets_dir: Path) -> None:
+def _draw_white_card(img: Image.Image, lines: list[str], emoji_str: str | None, assets_dir: Path, layout_mode: str = "blurred_frame") -> None:
     bold_path, normal_path, _ = _load_font_paths(assets_dir)
     normal_f = ImageFont.truetype(normal_path, SECONDARY_FONT_SIZE)
     bold_f = ImageFont.truetype(bold_path, SECONDARY_FONT_SIZE)
@@ -179,7 +179,11 @@ def _draw_white_card(img: Image.Image, lines: list[str], emoji_str: str | None, 
     box_width = max_line_width + BOX_PAD_X * 2
     box_height = total_text_height + BOX_PAD_Y * 2
     box_x = (CANVAS_W - box_width) // 2
-    box_y = 92
+    
+    # 40px overlap into top edge of main video frame (TikTok / Reels reference positioning)
+    CAPTION_OVERLAP = 40
+    video_top_y = 370 if layout_mode != "face_crop" else 280
+    box_y = max(15, video_top_y - box_height + CAPTION_OVERLAP)
 
     shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
     shadow_draw = ImageDraw.Draw(shadow)
@@ -233,7 +237,7 @@ def render_caption(
     emoji_str = moment.emoji.strip() if eff_include_emoji and moment.emoji else None
 
     img = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
-    _draw_white_card(img, raw_lines, emoji_str, assets_dir)
+    _draw_white_card(img, raw_lines, emoji_str, assets_dir, layout_mode=layout_mode)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(output_path))
