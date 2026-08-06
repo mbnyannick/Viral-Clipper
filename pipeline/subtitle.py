@@ -232,13 +232,13 @@ def build_word_subtitle_filter(
     style = pysubs2.SSAStyle(
         fontname="Roboto Medium",
         fontsize=font_size,
-        primarycolor=pysubs2.Color(255, 255, 255),    # Pure White
-        secondarycolor=pysubs2.Color(255, 255, 255),  # 100% Pure White (No yellow!)
-        outlinecolor=pysubs2.Color(0, 0, 0),          # Black outline/glow
+        primarycolor=pysubs2.Color(255, 255, 255),    # Pure White for upcoming text
+        secondarycolor=pysubs2.Color(255, 215, 0),    # Vibrant Yellow (#FFD700) for active spoken word karaoke!
+        outlinecolor=pysubs2.Color(0, 0, 0),          # Thick Black outline
         backcolor=pysubs2.Color(0, 0, 0, 160),
-        bold=True,                                     # Bold white text
-        outline=3.5,                                   # Clean 3.5px black outline
-        shadow=1.5,                                    # Subtle drop shadow glow
+        bold=True,                                     # Bold high-contrast text
+        outline=4.0,                                   # Clean 4.0px black stroke
+        shadow=2.0,                                    # Drop shadow glow
         alignment=2,                                  # Bottom-center alignment
         marginl=10,
         marginr=10,
@@ -260,8 +260,8 @@ def build_word_subtitle_filter(
                     gap_cs = int(round(gap_sec * 100))
                     karaoke_parts.append(f"{{\\k{gap_cs}}}")
             
-            # Render words in pure solid white text
-            karaoke_parts.append(f"{{\\k{dur_cs}}}{w['word']}")
+            # {\kf<cs>} creates silky smooth left-to-right yellow fill tracking
+            karaoke_parts.append(f"{{\\kf{dur_cs}}}{w['word']}")
 
         # {\q2} forces libass to NEVER wrap text onto a 2nd or 3rd line under any circumstances!
         full_karaoke_text = "{\\q2}" + " ".join(karaoke_parts)
