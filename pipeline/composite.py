@@ -318,9 +318,11 @@ async def _composite_one(
         has_sub = en_sub and sf and Path(sf).exists()
         if has_sub:
             safe_sub = str(sf).replace(":", "\\:").replace("'", "\\'")
+            fonts_dir = str(Path("assets/fonts").resolve()).replace(":", "\\:").replace("'", "\\'")
+            sub_filter = f"subtitles='{safe_sub}':fontsdir='{fonts_dir}'"
             if af:
-                return f"[out2]{af}[out_aura];[out_aura]subtitles='{safe_sub}'[out]"
-            return f"[out2]subtitles='{safe_sub}'[out]"
+                return f"[out2]{af}[out_aura];[out_aura]{sub_filter}[out]"
+            return f"[out2]{sub_filter}[out]"
         else:
             if af:
                 return f"[out2]{af}[out]"

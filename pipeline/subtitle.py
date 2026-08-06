@@ -229,22 +229,32 @@ def build_word_subtitle_filter(
     subs.info["PlayResY"] = str(canvas_h)
     subs.info["WrapStyle"] = "2"  # Strict single horizontal line (no multi-line stacking!)
 
+    # Exact KaiStyle specification: Bebas Neue, Primary White (&H00FFFFFF), Secondary Yellow (&H0000FFFF), 4px Black Outline, 0 Shadow
+    font_size = max(52, int(canvas_w * 0.072))
     style = pysubs2.SSAStyle(
-        fontname="Roboto Medium",
+        fontname="Bebas Neue",
         fontsize=font_size,
-        primarycolor=pysubs2.Color(255, 255, 255),    # Pure White for upcoming text
-        secondarycolor=pysubs2.Color(255, 215, 0),    # Vibrant Yellow (#FFD700) for active spoken word karaoke!
-        outlinecolor=pysubs2.Color(0, 0, 0),          # Thick Black outline
-        backcolor=pysubs2.Color(0, 0, 0, 160),
-        bold=True,                                     # Bold high-contrast text
-        outline=4.0,                                   # Clean 4.0px black stroke
-        shadow=2.0,                                    # Drop shadow glow
-        alignment=2,                                  # Bottom-center alignment
+        primarycolor=pysubs2.Color(255, 255, 255),    # &H00FFFFFF (Pure White)
+        secondarycolor=pysubs2.Color(255, 255, 0),    # &H0000FFFF (Vibrant Yellow for \kf active tracking)
+        outlinecolor=pysubs2.Color(0, 0, 0),          # &H00000000 (Pure Black)
+        backcolor=pysubs2.Color(0, 0, 0, 0),          # &H00000000 (Transparent)
+        bold=True,                                     # Bold
+        italic=False,
+        underline=False,
+        strikeout=False,
+        scalex=100.0,
+        scaley=100.0,
+        spacing=0.0,
+        angle=0.0,
+        borderstyle=1,                                 # Outline + Shadow
+        outline=4.0,                                   # 4px Outline
+        shadow=0.0,                                    # 0 Shadow
+        alignment=2,                                  # Bottom-Center alignment
         marginl=10,
         marginr=10,
         marginv=margin_v,
     )
-    subs.styles["CapCutKaraoke"] = style
+    subs.styles["KaiStyle"] = style
 
     for p in phrases:
         p_start_ms = int(p[0]["start"] * 1000)
@@ -253,7 +263,6 @@ def build_word_subtitle_filter(
         karaoke_parts = []
         for i, w in enumerate(p):
             dur_cs = max(10, int(round((w["end"] - w["start"]) * 100)))
-            # Add gap centiseconds if there's a pause before this word
             if i > 0:
                 gap_sec = w["start"] - p[i-1]["end"]
                 if gap_sec > 0.05:
@@ -263,12 +272,11 @@ def build_word_subtitle_filter(
             # {\kf<cs>} creates silky smooth left-to-right yellow fill tracking
             karaoke_parts.append(f"{{\\kf{dur_cs}}}{w['word']}")
 
-        # {\q2} forces libass to NEVER wrap text onto a 2nd or 3rd line under any circumstances!
         full_karaoke_text = "{\\q2}" + " ".join(karaoke_parts)
         event = pysubs2.SSAEvent(
             start=p_start_ms,
             end=p_end_ms,
-            style="CapCutKaraoke",
+            style="KaiStyle",
             text=full_karaoke_text
         )
         subs.events.append(event)
