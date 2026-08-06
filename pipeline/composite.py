@@ -293,39 +293,14 @@ async def _composite_one(
         except Exception as sub_exc:
             logger.warning("Subtitle generation exception: %s", sub_exc)
 
-    aura_filter = None
-    aura_w = getattr(moment, "aura_word", "")
-    if not aura_w and getattr(moment, "title", ""):
-        words = [w.strip(".,!?*#") for w in moment.title.split() if w.isupper() and len(w) > 3]
-        if words:
-            aura_w = words[0]
-
-    if aura_w:
-        try:
-            from .subtitle import build_aura_keyword_filter
-            aura_filter = build_aura_keyword_filter(
-                aura_word=aura_w,
-                moment_duration=moment.duration,
-                canvas_w=CANVAS_W,
-                canvas_h=CANVAS_H,
-                appear_at=1.2,
-                hold_duration=3.5,
-            )
-        except Exception as aura_exc:
-            logger.warning("Aura keyword filter exception: %s", aura_exc)
-
-    def _build_sub_stage(sf: Path | str | None, en_sub: bool, af: str | None) -> str:
+    # Clean single-stream ASS subtitles (pop-up aura filter removed to prevent duplicate text)
+    def _build_sub_stage(sf: Path | str | None, en_sub: bool) -> str:
         has_sub = en_sub and sf and Path(sf).exists()
         if has_sub:
             safe_sub = str(sf).replace(":", "\\:").replace("'", "\\'")
             fonts_dir = str(Path("assets/fonts").resolve()).replace(":", "\\:").replace("'", "\\'")
-            sub_filter = f"subtitles='{safe_sub}':fontsdir='{fonts_dir}'"
-            if af:
-                return f"[out2]{af}[out_aura];[out_aura]{sub_filter}[out]"
-            return f"[out2]{sub_filter}[out]"
+            return f"[out2]subtitles='{safe_sub}':fontsdir='{fonts_dir}'[out]"
         else:
-            if af:
-                return f"[out2]{af}[out]"
             return "[out2]null[out]"
 
     if layout_mode == "face_crop":
@@ -334,7 +309,7 @@ async def _composite_one(
             "  Compositing clip %02d (face_crop clean full screen, wm_y=%d)",
             moment.index, wm_y,
         )
-        sub_stage = _build_sub_stage(sub_file, enable_subtitles, aura_filter)
+        sub_stage = _build_sub_stage(sub_file, enable_subtitles)
 
         concat_v = f"[0:v]{crop_filter},{COLOR_ENHANCE},setpts=PTS-STARTPTS[vbase];"
 
@@ -349,7 +324,7 @@ async def _composite_one(
             "  Compositing clip %02d (%s 720x1280, crop=%s, wm_y=%d)",
             moment.index, layout_mode, "1:1" if is_square else "4:3", wm_y,
         )
-        sub_stage = _build_sub_stage(sub_file, enable_subtitles, aura_filter)
+        sub_stage = _build_sub_stage(sub_file, enable_subtitles)
 
         # Silky smooth HD background blur + Lanczos sharp main video scaling
         concat_v = (
@@ -378,7 +353,7 @@ async def _composite_one(
             bg_color = "#1a1a1a"
 
         bg_color_pad = bg_color.replace("#", "0x")
-        sub_stage = _build_sub_stage(sub_file, enable_subtitles, aura_filter)
+        sub_stage = _build_sub_stage(sub_file, enable_subtitles)
 
         concat_v = f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h},{COLOR_ENHANCE},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},setpts=PTS-STARTPTS[vbase];"
 
