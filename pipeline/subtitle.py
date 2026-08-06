@@ -142,9 +142,9 @@ def build_word_subtitle_filter(
     time_offset: float = 0.0,
 ) -> tuple[str | None, str | None]:
     """
-    Subtitles completely disabled per user request until new subtitle engine is installed.
+    Build Option 2: CapCut Clean Karaoke Style subtitles.
+    Displays 2-3 words per phrase with silky-smooth left-to-right yellow karaoke word highlighting.
     """
-    return None, None
     speed_factor = 1.00
     words: list[dict] = []
     for seg in segments:
@@ -157,12 +157,10 @@ def build_word_subtitle_filter(
             rel_end = max(rel_start + 0.05, round((w_end - clip_start) / speed_factor, 3) + round(time_offset, 3))
             raw_w = mask_profanity(_clean_word_text(w["word"]))
             if raw_w:
-                title_w = raw_w.capitalize()
                 words.append({
-                    "word": _escape_ffmpeg_text(title_w),
+                    "word": _escape_ffmpeg_text(raw_w.capitalize()),
                     "start": rel_start,
                     "end": rel_end,
-                    "style": _get_word_style(raw_w),
                 })
 
     if not words and segments:
@@ -188,47 +186,28 @@ def build_word_subtitle_filter(
                         "word": _escape_ffmpeg_text(clean_w.capitalize()),
                         "start": rel_start,
                         "end": rel_end,
-                        "style": _get_word_style(clean_w),
                     })
-
 
     if not words:
         logger.info("  No word timestamps for clip [%.1f-%.1f] — skipping subtitles", clip_start, clip_end)
         return None, None
 
-
-    # Extract punch expression for the 1.2x zoom
-    punch_words = []
-    for w in words:
-        if len(w["word"]) > 3:
-            punch_words.append(w)
-    
-    punch_in_expr = None
-    if punch_words:
-        exprs = []
-        for pw in punch_words:
-            exprs.append(f"between(t,{pw['start']},{pw['end']+0.5})")
-        punch_in_expr = "+".join(exprs)
-
-    # Group words into max 2-word phrases so subtitles stay strictly on 1 single line
+    # Group words into clean 2 to 3-word phrases
     phrases = []
     current_phrase = []
     for w in words:
         current_phrase.append(w)
-        # Break phrase if we have 2 words, or if there is a long pause > 0.35s
-        if len(current_phrase) >= 2:
+        if len(current_phrase) >= 3:
             phrases.append(current_phrase)
             current_phrase = []
         elif w != words[-1]:
             next_w = words[words.index(w) + 1]
-            if next_w["start"] - w["end"] > 0.35:
+            if next_w["start"] - w["end"] > 0.30:
                 phrases.append(current_phrase)
                 current_phrase = []
     if current_phrase:
         phrases.append(current_phrase)
 
-
-    # Generate ASS file content
     def _format_ass_time(sec: float) -> str:
         h = int(sec // 3600)
         m = int((sec % 3600) // 60)
@@ -239,10 +218,11 @@ def build_word_subtitle_filter(
             cs = 0
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
-    # Eye-level vertical position (lower 22% from bottom, clean safe zone)
-    margin_v = int(canvas_h * 0.22)
-    font_size = max(40, int(canvas_h * 0.040))
+    # Eye-level vertical position (lower 20% from bottom, clean safe zone)
+    margin_v = int(canvas_h * 0.20)
+    font_size = max(42, int(canvas_w * 0.044))
 
+    # ASS Color spec: &HBBGGRR& (PrimaryColour = White &H00FFFFFF, SecondaryColour = Vibrant Yellow &H0000FFFF)
     ass_lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -251,8 +231,8 @@ def build_word_subtitle_filter(
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        # Clean viral style — pure white text with thick black outline & drop shadow
-        f"Style: ViralSub,Inter-Bold,{font_size},&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,1,2,20,20,{margin_v},1",
+        # CapCut Karaoke Style — Primary = White, Secondary = Vibrant Yellow fill on active spoken word
+        f"Style: CapCutKaraoke,Inter-Bold,{font_size},&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3.5,1.5,2,24,24,{margin_v},1",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
@@ -262,37 +242,29 @@ def build_word_subtitle_filter(
         p_start = p[0]["start"]
         p_end = max(p_start + 0.5, p[-1]["end"] + 0.15)
 
-        # Non-overlapping sequential word highlighting inside the phrase
+        karaoke_parts = []
         for i, w in enumerate(p):
-            line_start = w["start"] if i == 0 else p[i]["start"]
-            line_end = p[i+1]["start"] if i + 1 < len(p) else p_end
-            if line_end <= line_start:
-                line_end = line_start + 0.2
+            dur_cs = max(10, int(round((w["end"] - w["start"]) * 100)))
+            # Add gap centiseconds if there's a pause before this word
+            if i > 0:
+                gap_sec = w["start"] - p[i-1]["end"]
+                if gap_sec > 0.05:
+                    gap_cs = int(round(gap_sec * 100))
+                    karaoke_parts.append(f"{{\\k{gap_cs}}}")
+            
+            # {\kf<cs>} creates silky smooth left-to-right yellow fill tracking
+            karaoke_parts.append(f"{{\\kf{dur_cs}}}{w['word']}")
 
-            words_formatted = []
-            for j, w2 in enumerate(p):
-                word_clean = w2["word"]
-                if j == i:
-                    # Highlight active spoken word in vibrant yellow (&H00FFFF& in ASS format)
-                    words_formatted.append(f"{{\\c&H00FFFF&\\b1}}{word_clean}{{\\c&HFFFFFF&\\b1}}")
-                else:
-                    words_formatted.append(word_clean)
-
-            full_line = " ".join(words_formatted)
-            # Single crisp dialogue layer (prevents duplicate text ghosting & overlap)
-            ass_lines.append(f"Dialogue: 0,{_format_ass_time(line_start)},{_format_ass_time(line_end)},ViralSub,,0,0,0,,{full_line}")
-
-
-
-
+        full_karaoke_text = " ".join(karaoke_parts)
+        ass_lines.append(f"Dialogue: 0,{_format_ass_time(p_start)},{_format_ass_time(p_end)},CapCutKaraoke,,0,0,0,,{full_karaoke_text}")
 
     import tempfile
     import uuid
     tmp_path = Path(tempfile.gettempdir()) / f"sub_{uuid.uuid4().hex}.ass"
     tmp_path.write_text("\n".join(ass_lines), encoding="utf-8")
 
-    logger.info("  Generated ASS subtitles with %d phrases: %s", len(phrases), tmp_path)
-    return str(tmp_path), punch_in_expr
+    logger.info("  Generated CapCut Karaoke ASS subtitles with %d phrases: %s", len(phrases), tmp_path)
+    return str(tmp_path), None
 
 
 def build_aura_keyword_filter(
