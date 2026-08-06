@@ -288,6 +288,7 @@ async def _composite_one(
                 clip_end=moment.end,
                 canvas_w=CANVAS_W,
                 canvas_h=CANVAS_H,
+                time_offset=vo_dur,
             )
         except Exception as sub_exc:
             logger.warning("Subtitle generation exception: %s", sub_exc)
@@ -427,12 +428,17 @@ async def _composite_one(
         a_idx += 1
 
 
-    # Standard 48kHz stereo clip audio mix with voiceover, BGM & SFX
-    audio_mix_filters = ["[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0[orig_a]"]
+    # Mute/delay original clip audio during Voiceover lead-in (resampled to 48kHz stereo)
+    if vo_dur > 0:
+        delay_ms = int(vo_dur * 1000)
+        audio_mix_filters = [f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.3,adelay=delays={delay_ms}|{delay_ms}[orig_a]"]
+    else:
+        audio_mix_filters = ["[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.3[orig_a]"]
+
     mix_inputs = ["[orig_a]"]
 
     if vo_input_idx is not None:
-        audio_mix_filters.append(f"[{vo_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.4[vo_a]")
+        audio_mix_filters.append(f"[{vo_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.5[vo_a]")
         mix_inputs.append("[vo_a]")
 
     if bgm_input_idx is not None:
@@ -441,7 +447,7 @@ async def _composite_one(
 
     if sfx_input_idx is not None:
         sfx_peak_sec = _detect_action_motion_peak(clip_path)
-        sfx_delay_ms = int(sfx_peak_sec * 1000)
+        sfx_delay_ms = int((sfx_peak_sec + vo_dur) * 1000)
         audio_mix_filters.append(f"[{sfx_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.6,adelay=delays={sfx_delay_ms}|{sfx_delay_ms}[sfx_a]")
         mix_inputs.append("[sfx_a]")
 
