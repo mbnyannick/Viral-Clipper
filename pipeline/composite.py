@@ -187,6 +187,7 @@ async def _composite_one(
     moment: Moment,
     output_dir: Path,
     layout_mode: str = "pillarbox",
+    enable_subtitles: bool = True,
     enable_silence_cut: bool = True,
     segments: list[dict] | None = None,
 ) -> Path:
@@ -506,6 +507,7 @@ async def composite_clips(
     moments: list[Moment],
     output_dir: Path,
     layout_mode: str = "pillarbox",
+    enable_subtitles: bool = True,
     enable_silence_cut: bool = True,
     segments: list[dict] | None = None,
     on_clip_ready: typing.Callable | None = None,
@@ -525,6 +527,7 @@ async def composite_clips(
                     moment,
                     output_dir,
                     layout_mode=layout_mode,
+                    enable_subtitles=enable_subtitles,
                     enable_silence_cut=enable_silence_cut,
                     segments=segments,
                 )
