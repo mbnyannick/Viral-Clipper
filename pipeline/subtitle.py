@@ -243,12 +243,12 @@ def build_word_subtitle_filter(
     for w in words:
         if dedup_words:
             last = dedup_words[-1]
-            if w["word"] == last["word"] and abs(w["start"] - last["start"]) < 0.3:
+            if w["word"] == last["word"] and abs(w["start"] - last["start"]) < 0.4:
                 continue
         dedup_words.append(w)
     words = dedup_words
 
-    # Group words into 1-word-at-a-time rapid pop-in phrases (Kai shorts 1-word pop-in style)
+    # Group words into 1-word-at-a-time clean single-line phrases
     phrases = [[w] for w in words]
 
     import pysubs2
@@ -256,10 +256,10 @@ def build_word_subtitle_filter(
     subs = pysubs2.SSAFile()
     subs.info["PlayResX"] = str(canvas_w)
     subs.info["PlayResY"] = str(canvas_h)
-    subs.info["WrapStyle"] = "2"  # Strict single horizontal line
+    subs.info["WrapStyle"] = "2"  # Strict single horizontal line (no multi-line stacking!)
 
     margin_v = int(canvas_h * 0.18)  # Lower safe zone below speaker chin/chest
-    font_size = max(56, int(canvas_w * 0.078))  # Prominent, bold 1-word pop-in font size
+    font_size = max(46, int(canvas_w * 0.064))  # Clean, crisp single-line font size
     style = pysubs2.SSAStyle(
         fontname="Bebas Neue",
         fontsize=font_size,
@@ -290,7 +290,8 @@ def build_word_subtitle_filter(
         p_end_ms = int(p[-1]["end"] * 1000)
         if idx < len(phrases) - 1:
             next_start_ms = int(phrases[idx + 1][0]["start"] * 1000)
-            p_end_ms = min(p_end_ms, max(p_start_ms + 100, next_start_ms - 10))
+            # Force current phrase to end at least 30ms before next phrase starts (prevents libass vertical stacking)
+            p_end_ms = min(p_end_ms, max(p_start_ms + 50, next_start_ms - 30))
 
         karaoke_parts = []
         for i, w in enumerate(p):
