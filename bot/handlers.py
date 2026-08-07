@@ -1407,6 +1407,51 @@ async def handle_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("ℹ️ Your queue was already empty.")
 
 
+async def handle_brief(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Command /brief — Set or clear custom AI campaign brief rules for clip scoring."""
+    if not update.effective_user or not _is_operator(update.effective_user.id):
+        await _handle_unapproved_user(update, context)
+        return
+
+    chat_id = update.effective_chat.id
+    args = context.args if (context and context.args) else []
+    text = " ".join(args).strip()
+
+    if not text:
+        current = _campaign_briefs.get(chat_id, "")
+        if current:
+            msg = (
+                f"🟢 **Active Campaign Brief:**\n\n"
+                f"_{current}_\n\n"
+                f"💡 *To update:* `/brief <new rules>`\n"
+                f"💡 *To clear:* `/brief clear`"
+            )
+        else:
+            msg = (
+                f"🔴 **No Campaign Brief Active.**\n\n"
+                f"Send custom rules to guide AI clip selection:\n"
+                f"• `/brief Focus on funny reactions & Kai rage moments`\n"
+                f"• `/brief Only clip moments where they talk about money or drama`\n"
+                f"• `/brief Highlight Speed and Kai gaming moments`"
+            )
+        await update.message.reply_text(msg, parse_mode="Markdown")
+        return
+
+    if text.lower() in ("clear", "off", "reset", "none", "disable"):
+        _campaign_briefs.pop(chat_id, None)
+        await update.message.reply_text("🔴 **Campaign Brief Cleared.** Default viral AI scoring is active.", parse_mode="Markdown")
+        return
+
+    _campaign_briefs[chat_id] = text
+    await update.message.reply_text(
+        f"🟢 **Campaign Brief Saved!**\n\n"
+        f"AI will now enforce these rules on all your video runs:\n"
+        f"_{text}_\n\n"
+        f"💡 *To remove rules anytime, send:* `/brief clear`",
+        parse_mode="Markdown",
+    )
+
+
 async def handle_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Command /schedule — shows pending scheduled posts for this user."""
     if not update.effective_user or not _is_operator(update.effective_user.id):
