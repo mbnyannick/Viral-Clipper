@@ -384,14 +384,18 @@ async def run_pipeline(
             clip_idx = m.index
             logger.info("⚡ [PROGRESSIVE PIPELINE] Clip #%02d finished compositing — starting instant QA & delivery pass", clip_idx + 1)
 
-            # 1. HD Thumbnail generation pass
+            # 1. HD Thumbnail generation pass (Extract Aura Word asterisk frame @ t=1.8s)
             try:
                 from pipeline.thumbnail import generate_cover_thumbnail
                 cap_png = captions[clip_idx][0] if clip_idx < len(captions) else None
-                src_clip = clips[clip_idx] if clip_idx < len(clips) else final_path
                 thumb_out = thumbs_dir / f"thumbnail_{clip_idx:02d}.jpg"
-                await generate_cover_thumbnail(src_clip, m, thumb_out, cap_png)
-                logger.info("  Generated thumbnail for Clip #%02d", clip_idx + 1)
+                await generate_cover_thumbnail(final_path, m, thumb_out, cap_png, frame_ts=1.8)
+                
+                # Copy to public clips folder for web serving
+                clips_public_dir = Path("tmp/clips")
+                clips_public_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(thumb_out, clips_public_dir / f"thumbnail_{clip_idx:02d}.jpg")
+                logger.info("  Generated Aura Cover Thumbnail for Clip #%02d (t=1.8s)", clip_idx + 1)
             except Exception as thumb_exc:
                 logger.warning("Thumbnail generation warning for clip #%02d: %s", clip_idx + 1, thumb_exc)
 
@@ -456,6 +460,8 @@ async def run_pipeline(
                     "caption": raw_title,
                     "description": raw_title,
                     "video_url": video_url,
+                    "thumbnail_url": f"https://150-136-108-208.sslip.io/clips/thumbnail_{idx-1:02d}.jpg",
+                    "cover_timestamp_ms": 1800,
                     "video_filename": f"clip_{idx:03d}.mp4",
                     "mime_type": "video/mp4",
                     "hashtags": hashtags,

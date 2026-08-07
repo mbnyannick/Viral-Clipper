@@ -1,8 +1,8 @@
 """
 HD Cover Thumbnail Generator for YouTube Shorts, TikTok & Reels.
 
-Extracts peak emotion frame from clip, applies color grade + vignette,
-and overlays bold title badge to create ready-to-use cover cards.
+Extracts the exact composited video frame at t = 1.8s containing the Aura Word
+Asterisk Overlay (*FAIL*, *COOKED*) with 40% white glow and Storytelling Header Card.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
+from PIL import Image, ImageEnhance
 
 from .score import Moment
 
@@ -25,20 +25,21 @@ async def generate_cover_thumbnail(
     moment: Moment,
     output_path: Path,
     caption_png_path: Path | None = None,
+    frame_ts: float = 1.8,
 ) -> Path:
     """
     Generate a 1080x1920 HD cover thumbnail card for *clip_path*.
-    Extracts high-emotion frame from 30% mark of clip, overlays title badge & dark vignette.
+    Extracts exact composited frame at t = 1.8s (Aura Word asterisk overlay + header card).
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     raw_frame_path = output_path.parent / f"raw_frame_{moment.index:02d}.jpg"
 
-    # Frame timestamp @ 30% into the clip (usually setup or peak expression)
-    frame_ts = max(0.5, (moment.end - moment.start) * 0.35)
+    # Frame timestamp @ 1.8 seconds (when Aura Word asterisk overlay is 100% visible)
+    extract_ts = max(0.5, frame_ts)
 
     cmd = [
         "ffmpeg", "-y",
-        "-ss", str(frame_ts),
+        "-ss", str(extract_ts),
         "-i", str(clip_path),
         "-vframes", "1",
         "-q:v", "2",
@@ -83,30 +84,13 @@ async def generate_cover_thumbnail(
 
         # Enhance saturation & contrast for vibrant thumbnail pop
         enhancer = ImageEnhance.Color(canvas)
-        canvas = enhancer.enhance(1.25)
+        canvas = enhancer.enhance(1.15)
         contrast = ImageEnhance.Contrast(canvas)
-        canvas = contrast.enhance(1.15)
+        canvas = contrast.enhance(1.08)
 
-        # Apply dark vignette overlay on top and bottom for text readability
-        overlay = Image.new("RGBA", (THUMB_W, THUMB_H), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-
-        # Top dark gradient (y: 0 to 450)
-        for y in range(450):
-            alpha = int(180 * (1 - y / 450.0))
-            draw.line([(0, y), (THUMB_W, y)], fill=(0, 0, 0, alpha))
-
-        # Bottom dark gradient (y: 1470 to 1920)
-        for y in range(1470, THUMB_H):
-            alpha = int(200 * ((y - 1470) / 450.0))
-            draw.line([(0, y), (THUMB_W, y)], fill=(0, 0, 0, alpha))
-
-        canvas = Image.alpha_composite(canvas, overlay)
-
-        # Clean 1080x1920 HD Cover snapshot (NO text overlay or card clutter)
+        # Save clean 1080x1920 HD Cover snapshot showing *WORD* asterisk overlay
         canvas.convert("RGB").save(str(output_path), "JPEG", quality=95)
-        logger.info("  Generated Clean HD Cover Snapshot: %s (1080x1920)", output_path.name)
-
+        logger.info("  Generated Aura Cover Thumbnail: %s (t=%.1fs, 1080x1920)", output_path.name, extract_ts)
 
     except Exception as exc:
         logger.warning("Thumbnail composite error (%s) — using raw frame fallback", exc)

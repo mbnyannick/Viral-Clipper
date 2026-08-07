@@ -771,6 +771,8 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
         "caption": clean_caption,
         "description": clean_caption,
         "video_url": video_url,
+        "thumbnail_url": f"https://150-136-108-208.sslip.io/clips/thumbnail_{int(clip_num)-1:02d}.jpg",
+        "cover_timestamp_ms": 1800,
         "video_filename": f"clip_{int(clip_num):03d}.mp4",
         "mime_type": "video/mp4",
         "hashtags": extracted_hashtags,
