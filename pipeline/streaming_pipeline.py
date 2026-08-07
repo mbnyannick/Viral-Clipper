@@ -124,12 +124,27 @@ class _ProgressTracker:
       4. 🏞️ Finishing  — compositing + rendering
     """
 
-    def __init__(self, bot, chat_id, total_windows: int, streamer: str, title: str) -> None:
+    def __init__(
+        self,
+        bot,
+        chat_id,
+        total_windows: int,
+        streamer: str,
+        title: str,
+        platform: str = "",
+        live_status: str = "",
+        dur_display: str = "",
+        target_clips: int = 10,
+    ) -> None:
         self.bot = bot
         self.chat_id = chat_id
         self.total = total_windows
         self.streamer = streamer
         self.title = title
+        self.platform = platform
+        self.live_status = live_status
+        self.dur_display = dur_display
+        self.target_clips = target_clips
 
         # Counters (all mutated from async coroutines — single-threaded asyncio, no lock needed)
         self.scanned = 0
@@ -152,8 +167,12 @@ class _ProgressTracker:
     def _render(self) -> str:
         import html
         s_name = html.escape(self.streamer)
-        t_name = html.escape(self.title[:32] + ("…" if len(self.title) > 32 else ""))
-        title_part = f"\n• <b>Title:</b> {t_name}" if t_name else ""
+        t_name = html.escape(self.title[:40] + ("…" if len(self.title) > 40 else "")) if self.title else ""
+
+        plat_str = f"• <b>Platform:</b> {html.escape(self.platform)}\n" if self.platform else ""
+        stat_str = f"• <b>Live Status:</b> {html.escape(self.live_status)}\n" if self.live_status else ""
+        title_str = f"• <b>Title:</b> {t_name}\n" if t_name else ""
+        dur_str = f"• <b>Duration:</b> {html.escape(self.dur_display)}\n" if self.dur_display else ""
 
         # Step calculation:
         if self.delivered > 0:
@@ -161,7 +180,8 @@ class _ProgressTracker:
         elif self.composited > 0:
             step_text = f"🏞️ 4/5 — Compositing Video Clips ({self.composited} ready)..."
         elif self.moments_found > 0:
-            step_text = f"✂️ 3/5 — Extracting Top HD Segments ({self.moments_found} moments found)..."
+            displayed_moments = min(self.moments_found, self.target_clips) if self.target_clips > 0 else self.moments_found
+            step_text = f"✂️ 3/5 — Extracting Top HD Segments ({displayed_moments} moments found)..."
         elif self.analyzed > 0:
             step_text = f"🧠 2/5 — AI Analyzing Virality & Story Arc..."
         else:
@@ -169,8 +189,11 @@ class _ProgressTracker:
 
         card = (
             f"🎬 <b>Video Details Identified:</b>\n"
-            f"• <b>Streamer:</b> {s_name}"
-            f"{title_part}\n\n"
+            f"{plat_str}"
+            f"{stat_str}"
+            f"• <b>Streamer:</b> {s_name}\n"
+            f"{title_str}"
+            f"{dur_str}\n"
             f"⚙️ <b>Live Progress:</b> {step_text}\n\n"
             f"☕ Feel free to step away while I process your clips!"
         )
@@ -646,8 +669,21 @@ async def run_streaming_pipeline(
         total, chunk_minutes, target_total_clips,
     )
 
+    u_lower = url.lower()
+    platform_name = "Kick" if "kick.com" in u_lower else ("Twitch" if "twitch.tv" in u_lower else ("YouTube" if "youtu" in u_lower else "Video"))
+    live_stat = "Recorded VOD"
+    dur_str = format_duration(stream_end_sec - stream_start_sec) if stream_end_sec else ""
+
     tracker = _ProgressTracker(
-        bot=bot, chat_id=chat_id, total_windows=total, streamer=streamer, title=video_title,
+        bot=bot,
+        chat_id=chat_id,
+        total_windows=total,
+        streamer=streamer,
+        title=video_title,
+        platform=platform_name,
+        live_status=live_stat,
+        dur_display=dur_str,
+        target_clips=target_total_clips,
     )
     await tracker.start()
 
