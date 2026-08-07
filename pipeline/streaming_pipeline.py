@@ -804,15 +804,17 @@ async def run_streaming_pipeline(
             if _is_admin_chat(chat_id):
                 action_keyboard = InlineKeyboardMarkup([
                     [
-                        InlineKeyboardButton("🚀 Post to TikTok", callback_data=f"post:tiktok:{clip_num}"),
-                        InlineKeyboardButton("🔴 Post to YouTube", callback_data=f"post:youtube:{clip_num}"),
+                        InlineKeyboardButton("⚡ Post to ALL Now", callback_data=f"post:all:{clip_num}"),
+                        InlineKeyboardButton("📅 Schedule Peak Time", callback_data=f"sched:all:{clip_num}"),
                     ],
                     [
-                        InlineKeyboardButton("📸 Post to IG Reels", callback_data=f"post:instagram:{clip_num}"),
-                        InlineKeyboardButton("📘 Post to Facebook", callback_data=f"post:facebook:{clip_num}"),
+                        InlineKeyboardButton("📱 TikTok", callback_data=f"post:tiktok:{clip_num}"),
+                        InlineKeyboardButton("🔴 YouTube", callback_data=f"post:youtube:{clip_num}"),
+                        InlineKeyboardButton("📸 IG Reels", callback_data=f"post:instagram:{clip_num}"),
+                        InlineKeyboardButton("📘 Facebook", callback_data=f"post:facebook:{clip_num}"),
                     ],
                     [
-                        InlineKeyboardButton("🌐 Post to ALL", callback_data=f"post:all:{clip_num}"),
+                        InlineKeyboardButton("🗑️ Discard Clip", callback_data=f"discard:{clip_num}"),
                     ],
                 ])
             else:
@@ -857,8 +859,69 @@ async def run_streaming_pipeline(
         await tracker.stop("⚠️ Could not render target clips from this stream.")
         return
 
+    # ── Build pending schedule session for "Schedule All" confirmation ──────
+    import shutil
+    try:
+        from bot.handlers import _pending_schedule_sessions
+        clips_public_dir = Path("tmp/clips")
+        clips_public_dir.mkdir(parents=True, exist_ok=True)
+        session_clips = []
+        for idx, (m, wdir, segs) in enumerate(final_moments_to_render, start=1):
+            clip_path = wdir / f"clip_{m.index:03d}.mp4"
+            if not clip_path.exists():
+                clip_path = wdir / "finals" / f"final_00.mp4"
+            if not clip_path.exists():
+                continue
+
+            safe_fid = "".join(c for c in clip_path.name if c.isalnum())[:20]
+            public_filename = f"clip_{safe_fid}.mp4"
+            public_path = clips_public_dir / public_filename
+            try:
+                if not public_path.exists():
+                    shutil.copy2(clip_path, public_path)
+                video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
+            except Exception:
+                video_url = ""
+
+            raw_title = getattr(m, "title", "") or getattr(m, "caption_lines", [""])[0]
+            hashtags = getattr(m, "hashtags", "") or ""
+            payload_base = {
+                "clip_id": f"clip_{idx:03d}",
+                "title": raw_title,
+                "caption": raw_title,
+                "description": raw_title,
+                "video_url": video_url,
+                "thumbnail_url": f"https://150-136-108-208.sslip.io/clips/thumbnail_{idx-1:02d}.jpg",
+                "cover_timestamp_ms": 1800,
+                "video_filename": f"clip_{idx:03d}.mp4",
+                "mime_type": "video/mp4",
+                "hashtags": hashtags,
+                "chat_id": chat_id,
+            }
+            session_clips.append({"clip_num": idx, "payload": payload_base})
+
+        if session_clips:
+            _pending_schedule_sessions[chat_id] = session_clips
+            sched_all_kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("📅 Schedule All Clips", callback_data=f"sched_all:confirm:{len(session_clips)}"),
+                    InlineKeyboardButton("⏭️ Skip Auto-Schedule", callback_data=f"sched_all:skip:{len(session_clips)}"),
+                ]
+            ])
+            await bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"📅 <b>Peak-Hour Auto-Scheduler</b>\n\n"
+                    f"Would you like to auto-schedule all <b>{len(session_clips)} clips</b> across peak viral hours on TikTok, YouTube Shorts, IG Reels, and Facebook Reels?"
+                ),
+                parse_mode="HTML",
+                reply_markup=sched_all_kb,
+            )
+    except Exception as sched_session_exc:
+        logger.warning("Could not build schedule session card: %s", sched_session_exc)
+
     final_card = (
-        f"✅ *Processing Complete!*\n"
+        f"✅ <b>Processing Complete!</b>\n"
         f"• Delivered {total_delivered} clip(s) from {streamer}'s {scope}.\n"
         f"• Enjoy your clips below!"
     )
