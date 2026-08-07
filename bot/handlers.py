@@ -959,8 +959,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         if action == "cancel_all":
-            if not update.effective_user or not _is_master_admin(update.effective_user.id):
-                await query.answer("🔒 Only the Admin can cancel all.", show_alert=True)
+            if not update.effective_user or not _is_operator(update.effective_user.id):
+                await query.answer("🔒 Only approved operators can cancel all.", show_alert=True)
                 return
             # Clear entire queue for this chat
             scheduler._queue = [item for item in scheduler._queue if item.get("chat_id") != chat_id]
@@ -972,8 +972,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 parse_mode="HTML",
             )
     if data.startswith("discard:"):
-        if not update.effective_user or not _is_master_admin(update.effective_user.id):
-            await query.answer("🔒 Only the Admin can discard clips.", show_alert=True)
+        if not update.effective_user or not _is_operator(update.effective_user.id):
+            await query.answer("🔒 Only approved operators can discard clips.", show_alert=True)
             return
         clip_num = data.split(":")[1] if ":" in data else "?"
         await query.answer(f"🗑️ Clip #{clip_num} Discarded!", show_alert=True)
