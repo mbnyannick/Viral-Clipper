@@ -27,3 +27,8 @@ edge-tts>=7.0.0
 # Subtitle ASS generation
 pysubs2>=1.7.0
 
+# Spike Chart Detection (Live Chat Velocity & Audio Energy RMS)
+chat-downloader>=0.2.8
+scipy>=1.11.0
+
+
