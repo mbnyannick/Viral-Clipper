@@ -432,20 +432,23 @@ async def _composite_one(
 
 
     # 100% Lip Sync: Original clip audio & video start together at 0.0s
-    # When voiceover exists, clip audio is ducked (0.35 volume) during voiceover narration, then boosts to 1.3
+    # When voiceover exists, clip audio & BGM are ducked to 10-15% during narration, then boost to full volume
     if vo_dur > 0:
-        audio_mix_filters = [f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=eval=frame:volume='if(lt(t,{vo_dur:.2f}),0.35,1.3)'[orig_a]"]
+        audio_mix_filters = [f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=eval=frame:volume='if(lt(t,{vo_dur:.2f}),0.15,1.3)'[orig_a]"]
     else:
         audio_mix_filters = ["[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.3[orig_a]"]
 
     mix_inputs = ["[orig_a]"]
 
     if vo_input_idx is not None:
-        audio_mix_filters.append(f"[{vo_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.5[vo_a]")
+        audio_mix_filters.append(f"[{vo_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.8[vo_a]")
         mix_inputs.append("[vo_a]")
 
     if bgm_input_idx is not None:
-        audio_mix_filters.append(f"[{bgm_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.25,aloop=loop=-1:size=2e+09[bgm_a]")
+        if vo_dur > 0:
+            audio_mix_filters.append(f"[{bgm_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=eval=frame:volume='if(lt(t,{vo_dur:.2f}),0.10,0.25)',aloop=loop=-1:size=2e+09[bgm_a]")
+        else:
+            audio_mix_filters.append(f"[{bgm_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.25,aloop=loop=-1:size=2e+09[bgm_a]")
         mix_inputs.append("[bgm_a]")
 
     if sfx_input_idx is not None:
