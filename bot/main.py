@@ -21,30 +21,28 @@ load_dotenv()
 
 
 def _cleanup_old_tmp_files() -> None:
-    """Housekeeper job: removes temp working folders older than 2h and output MP4s older than 48h."""
+    """Housekeeper job: removes temp working folders older than 2h and public MP4 clips older than 48h."""
     now = time.time()
     tmp_dir = Path("tmp")
     if tmp_dir.exists():
         cutoff_tmp = 2 * 3600
+        cutoff_clips = 48 * 3600  # Preserve public clip MP4s for 48 hours for scheduled posting
         for item in tmp_dir.iterdir():
-            if item.is_dir() and item.name != "telegram_uploads":
+            if item.is_dir() and item.name == "clips":
+                for clip_file in item.glob("*.mp4"):
+                    try:
+                        if now - clip_file.stat().st_mtime > cutoff_clips:
+                            clip_file.unlink(missing_ok=True)
+                            logging.info("Auto-housekeeper cleaned old public clip: %s", clip_file.name)
+                    except Exception as exc:
+                        logging.warning("Public clip cleanup failed for %s: %s", clip_file, exc)
+            elif item.is_dir() and item.name != "telegram_uploads":
                 try:
                     if now - item.stat().st_mtime > cutoff_tmp:
                         shutil.rmtree(item, ignore_errors=True)
                         logging.info("Auto-housekeeper cleaned old temp folder: %s", item.name)
                 except Exception as exc:
                     logging.warning("Housekeeper cleanup failed for %s: %s", item, exc)
-
-    output_dir = Path("output")
-    if output_dir.exists():
-        cutoff_output = 48 * 3600  # Delete rendered MP4 clips older than 48 hours
-        for vid in output_dir.glob("*.mp4"):
-            try:
-                if now - vid.stat().st_mtime > cutoff_output:
-                    vid.unlink(missing_ok=True)
-                    logging.info("Auto-housekeeper cleaned published clip: %s", vid.name)
-            except Exception as exc:
-                logging.warning("Output clip cleanup failed for %s: %s", vid.name, exc)
 
 
 
