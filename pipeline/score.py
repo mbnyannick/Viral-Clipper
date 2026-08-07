@@ -165,6 +165,7 @@ async def score_moments(
     video_title: str = "",
     campaign_brief: str = "",
     target_duration: str = "auto",
+    spike_windows: list[dict] | None = None,
 ) -> list[Moment]:
     """Score transcript and return ranked list of Moment objects with optional Campaign Brief directives and target clip duration."""
     client = AsyncOpenAI(api_key=api_key, base_url="https://api.deepseek.com")
@@ -188,6 +189,18 @@ async def score_moments(
         "12. CLIP DURATION: Each moment MUST be between 25 and 60 seconds (end - start MUST be >= 25 and <= 60).",
         f"12. CLIP DURATION: {dur_text}"
     )
+
+    if spike_windows:
+        spike_text = "\n".join(
+            f"• Chart Peak Spike @ {int(w['start_sec']//60):02d}:{int(w['start_sec']%60):02d}–{int(w['end_sec']//60):02d}:{int(w['end_sec']%60):02d} (Spike Density: {int(w['spike_score']*100)}%)"
+            for w in spike_windows
+        )
+        system += (
+            f"\n\nLIVE VIEWER DENSITY & CHART REPLAY SPIKES DETECTED:\n{spike_text}\n\n"
+            "MANDATORY SPIKE SELECTION DIRECTIVE:\n"
+            "The timestamp ranges above represent peak viewer activity, live chat velocity bursts, and replay heatmap climaxes.\n"
+            "You MUST prioritize selecting clip candidate moments that align closely with these peak chart spike timestamp ranges!"
+        )
 
     if campaign_brief:
         system += (

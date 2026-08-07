@@ -296,11 +296,21 @@ async def run_pipeline(
         await update_status("📥 1/6 — Downloading Video Stream...")
         video_path, audio_path, _ = await download(url, run_dir, streamer_info=streamer_info)
 
-        # ── 3. Chunk & Transcribe ───────────────────────────────────────────────
-        await update_status("🎙️ 2/6 — Transcribing Speech & Audio...")
+        # ── 3. Chunk, Transcribe & Chart Spike Scan ──────────────────────────────
+        await update_status("🎙️ 2/6 — Transcribing Speech & Scanning Chart Spikes...")
         chunk_minutes = int(os.getenv("CHUNK_DURATION_MINUTES", "3"))
         chunks = await chunk_audio(audio_path, chunk_duration_minutes=chunk_minutes)
+        
+        from pipeline.spike import compute_composite_spike_curve
+        spike_task = asyncio.create_task(
+            compute_composite_spike_curve(url, audio_path=audio_path, duration_sec=duration_sec)
+        )
         segments = await transcribe_chunks(chunks)
+        try:
+            spike_windows = await spike_task
+        except Exception as spk_exc:
+            logger.warning("Spike curve scan warning: %s", spk_exc)
+            spike_windows = []
 
         # ── 4. Score & Select Moments ───────────────────────────────────────────
         await update_status("🧠 3/6 — AI Scoring Virality & Story Arc...")
@@ -315,6 +325,7 @@ async def run_pipeline(
             video_title=video_title,
             campaign_brief=campaign_brief,
             target_duration=target_duration,
+            spike_windows=spike_windows,
         )
         moments = moments[:top_n]
 
