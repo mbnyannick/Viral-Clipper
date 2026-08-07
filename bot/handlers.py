@@ -982,30 +982,35 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     if data.startswith("sched:"):
 
 
-        if not update.effective_user or not _is_master_admin(update.effective_user.id):
-            await query.answer("🔒 Scheduling is restricted to the Admin.", show_alert=True)
+        if not update.effective_user or not _is_operator(update.effective_user.id):
+            await query.answer("🔒 Scheduling is restricted to approved users.", show_alert=True)
             return
         parts = data.split(":")
         sched_platform = parts[1]  # "all" or specific platform
         clip_num = parts[2] if len(parts) > 2 else "1"
         msg = query.message if query else None
         raw_caption = msg.caption if msg and msg.caption else ""
-        title_text, clean_caption, extracted_hashtags = _extract_title_and_caption(raw_caption, clip_num)
+        title_text, clean_caption = _extract_title_and_caption(raw_caption, clip_num)
+        extracted_hashtags = " ".join([w for w in clean_caption.split() if w.startswith("#")]) or "#Viral #Shorts"
 
         video_url = ""
-        if msg and msg.video:
+        clips_dir = Path("tmp/clips")
+        clips_dir.mkdir(parents=True, exist_ok=True)
+        matching_clips = list(clips_dir.glob(f"clip_*{clip_num}*.mp4")) + list(clips_dir.glob("*.mp4"))
+        if matching_clips:
+            video_url = f"https://150-136-108-208.sslip.io/clips/{matching_clips[0].name}"
+        elif msg and msg.video:
             try:
-                tg_file = await context.bot.get_file(msg.video.file_id)
-                clips_dir = Path("tmp/clips")
-                clips_dir.mkdir(parents=True, exist_ok=True)
                 safe_fid = "".join(c for c in msg.video.file_id if c.isalnum())[:20]
                 public_filename = f"clip_{safe_fid}.mp4"
                 public_path = clips_dir / public_filename
                 if not public_path.exists():
-                    await tg_file.download_to_drive(public_path)
+                    tg_file = await asyncio.wait_for(context.bot.get_file(msg.video.file_id), timeout=4.0)
+                    await asyncio.wait_for(tg_file.download_to_drive(public_path), timeout=8.0)
                 video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
             except Exception as exc:
                 logger.warning("Scheduler: could not resolve video URL: %s", exc)
+                video_url = f"https://150-136-108-208.sslip.io/clips/clip_{int(clip_num):03d}.mp4"
 
         platforms = ["tiktok", "instagram", "facebook", "youtube"] if sched_platform == "all" else [sched_platform]
 
