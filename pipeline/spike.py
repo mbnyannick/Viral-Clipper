@@ -38,7 +38,11 @@ def extract_youtube_heatmap_spikes(url: str) -> list[dict[str, float]]:
 
     try:
         import yt_dlp
+        cookie_path = Path("cookies.txt")
         ydl_opts = {"skip_download": True, "quiet": True, "no_warnings": True}
+        if cookie_path.exists():
+            ydl_opts["cookiefile"] = str(cookie_path)
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             heatmap = info.get("heatmap") or []
