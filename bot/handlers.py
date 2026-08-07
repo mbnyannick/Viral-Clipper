@@ -375,6 +375,7 @@ async def _launch_job(chat_id: int, num_clips: int, target_duration: str = "auto
     orig_context = session["context"]
     layout_mode = session.get("layout_mode", "black_canvas")
     enable_wm = session.get("enable_watermark", False)
+    enable_sub = session.get("enable_subtitles", True)
     wm_name = session.get("wm_name", "None")
 
     dur_map = {
@@ -403,6 +404,7 @@ async def _launch_job(chat_id: int, num_clips: int, target_duration: str = "auto
     }
     mode_label = mode_map.get(layout_mode, "🖤 Black Canvas")
     wm_label = f"`{wm_name}`" if enable_wm else "*None*"
+    sub_label = "💬 Enabled" if enable_sub else "🚫 Disabled"
 
     campaign_brief = _campaign_briefs.get(chat_id, "")
     brief_status = "🟢 Active" if campaign_brief else "🔴 None"
@@ -411,6 +413,7 @@ async def _launch_job(chat_id: int, num_clips: int, target_duration: str = "auto
         f"✅ **Options Selected!**\n\n"
         f"• **Layout:** {mode_label}\n"
         f"• **Watermark:** {wm_label}\n"
+        f"• **Subtitles:** {sub_label}\n"
         f"• **Campaign Brief:** {brief_status}\n"
         f"• **Target Clips:** *{num_clips} clips*\n"
         f"• **Clip Duration:** {dur_label}\n\n"
@@ -427,7 +430,7 @@ async def _launch_job(chat_id: int, num_clips: int, target_duration: str = "auto
 
     _ensure_worker_running()
     is_user_active = (chat_id in _active_tasks_by_chat) and not _active_tasks_by_chat[chat_id][0].done()
-    await _job_queue.put((url, orig_update, orig_context, layout_mode, enable_wm, True, num_clips, campaign_brief, target_duration))
+    await _job_queue.put((url, orig_update, orig_context, layout_mode, enable_wm, enable_sub, True, num_clips, campaign_brief, target_duration))
 
     if is_user_active:
         user_pos = sum(
@@ -443,19 +446,20 @@ async def _queue_worker() -> None:
     """Background worker that continuously pulls and processes jobs from the queue."""
     while True:
         job = await _job_queue.get()
-        url, update, context, layout_mode, enable_wm, enable_silence, top_n_clips, campaign_brief, target_duration = job
+        url, update, context, layout_mode, enable_wm, enable_sub, enable_silence, top_n_clips, campaign_brief, target_duration = job
         chat_id = update.effective_chat.id if update and update.effective_chat else 0
 
         try:
             logger.info(
-                "Worker picked up job for user %d: %s (mode=%s, wm=%s, clips=%d, dur=%s, Queue remaining: %d)",
-                chat_id, url, layout_mode, enable_wm, top_n_clips, target_duration, _job_queue.qsize()
+                "Worker picked up job for user %d: %s (mode=%s, wm=%s, sub=%s, clips=%d, dur=%s, Queue remaining: %d)",
+                chat_id, url, layout_mode, enable_wm, enable_sub, top_n_clips, target_duration, _job_queue.qsize()
             )
             task = asyncio.create_task(
                 run_pipeline(
                     url, update, context,
                     layout_mode=layout_mode,
                     enable_watermark=enable_wm,
+                    enable_subtitles=enable_sub,
                     enable_silence_cut=enable_silence,
                     top_n_clips=top_n_clips,
                     campaign_brief=campaign_brief,
