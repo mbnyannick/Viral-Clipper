@@ -694,9 +694,9 @@ def _update_keyboard_posting(reply_markup: InlineKeyboardMarkup, platform: str) 
         new_row = []
         for btn in row:
             cb_data = btn.callback_data or ""
-            if platform == "all" or f"post:{platform}:" in cb_data:
-                target_name = "TikTok" if "tiktok" in cb_data else ("YouTube" if "youtube" in cb_data else ("IG Reels" if "instagram" in cb_data else ("Facebook" if "facebook" in cb_data else "ALL")))
-                new_row.append(InlineKeyboardButton(text=f"⏳ Posting to {target_name}...", callback_data=cb_data))
+            if platform == "all" or f"post:{platform}:" in cb_data or f"sched:{platform}:" in cb_data:
+                label = "TikTok" if "tiktok" in cb_data else ("YouTube" if "youtube" in cb_data else ("IG Reels" if "instagram" in cb_data else ("Facebook" if "facebook" in cb_data else "ALL")))
+                new_row.append(InlineKeyboardButton(text=f"⏳ Posting to {label}...", callback_data=cb_data))
             else:
                 new_row.append(btn)
         new_rows.append(new_row)
@@ -712,9 +712,9 @@ def _update_keyboard_posted(reply_markup: InlineKeyboardMarkup, platform: str) -
         new_row = []
         for btn in row:
             cb_data = btn.callback_data or ""
-            if platform == "all" or f"post:{platform}:" in cb_data:
-                target_name = "TikTok" if "tiktok" in cb_data else ("YouTube" if "youtube" in cb_data else ("IG Reels" if "instagram" in cb_data else ("Facebook" if "facebook" in cb_data else "ALL")))
-                new_row.append(InlineKeyboardButton(text=f"✅ Posted to {target_name}", callback_data=f"done:{target_name.lower()}"))
+            if platform == "all" or f"post:{platform}:" in cb_data or f"sched:{platform}:" in cb_data:
+                label = "TikTok" if "tiktok" in cb_data else ("YouTube" if "youtube" in cb_data else ("IG Reels" if "instagram" in cb_data else ("Facebook" if "facebook" in cb_data else "ALL")))
+                new_row.append(InlineKeyboardButton(text=f"✅ Posted to {label}", callback_data=f"done:{label.lower()}"))
             else:
                 new_row.append(btn)
         new_rows.append(new_row)
@@ -763,24 +763,6 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
             logger.warning("Could not download clip for public server: %s", f_exc)
             video_url = f"https://150-136-108-208.sslip.io/clips/clip_{int(clip_num):03d}.mp4"
 
-    logger.info("Publishing clip to platform '%s', clip_num %s, video_url='%s'", platform, clip_num, video_url)
-    payload = {
-        "platform": platform,
-        "clip_id": f"clip_{int(clip_num):03d}",
-        "title": title_text,
-        "caption": clean_caption,
-        "description": clean_caption,
-        "video_url": video_url,
-        "thumbnail_url": f"https://150-136-108-208.sslip.io/clips/thumbnail_{int(clip_num)-1:02d}.jpg",
-        "cover_timestamp_ms": 1800,
-        "video_filename": f"clip_{int(clip_num):03d}.mp4",
-        "mime_type": "video/mp4",
-        "hashtags": extracted_hashtags,
-        "chat_id": chat_id,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-    logger.info("Sending to publisher: %s", payload)
-
     def _post_json_sync(url: str, post_data: dict) -> tuple[int, str]:
         import json
         import urllib.request
@@ -798,28 +780,46 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
         with urllib.request.urlopen(req, timeout=10) as response:
             return response.status, response.read().decode("utf-8", errors="replace")
 
-    try:
-        status_code, body_text = await asyncio.to_thread(_post_json_sync, webhook_url, payload)
-        if status_code in (200, 201, 202):
-            if msg and msg.reply_markup:
-                try:
-                    posted_kb = _update_keyboard_posted(msg.reply_markup, platform)
-                    await _safe_edit_message_reply_markup(query, reply_markup=posted_kb)
-                except Exception as k_exc:
-                    logger.warning("Could not update keyboard to posted state: %s", k_exc)
+    target_platforms = ["tiktok", "youtube", "instagram", "facebook"] if platform == "all" else [platform]
 
-            await msg.reply_text(
-                f"✅ **Sent to Publisher!**\n\n"
-                f"• **Platform:** `{platform.upper()}`\n"
-                f"• **Clip:** #{clip_num}\n"
-                f"• **Status:** Publishing Triggered Successfully",
-                parse_mode="Markdown",
-            )
-        else:
-            await msg.reply_text(f"⚠️ Publishing system returned HTTP status {status_code}.")
-    except Exception as http_exc:
-        logger.error("Publisher dispatch error: %s", http_exc)
-        await msg.reply_text(f"❌ Failed to reach Publishing System: {http_exc}")
+    for p in target_platforms:
+        payload = {
+            "platform": p,
+            "clip_id": f"clip_{int(clip_num):03d}",
+            "title": title_text,
+            "caption": clean_caption,
+            "description": clean_caption,
+            "video_url": video_url,
+            "thumbnail_url": f"https://150-136-108-208.sslip.io/clips/thumbnail_{int(clip_num)-1:02d}.jpg",
+            "cover_timestamp_ms": 1800,
+            "video_filename": f"clip_{int(clip_num):03d}.mp4",
+            "mime_type": "video/mp4",
+            "hashtags": extracted_hashtags,
+            "chat_id": chat_id,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        logger.info("Publishing clip to platform '%s', clip_num %s, video_url='%s'", p, clip_num, video_url)
+        try:
+            status_code, body_text = await asyncio.to_thread(_post_json_sync, webhook_url, payload)
+            logger.info("Publisher status for %s: %s", p, status_code)
+        except Exception as http_exc:
+            logger.warning("Publisher request failed for %s: %s", p, http_exc)
+
+    if msg and msg.reply_markup:
+        try:
+            posted_kb = _update_keyboard_posted(msg.reply_markup, platform)
+            await _safe_edit_message_reply_markup(query, reply_markup=posted_kb)
+        except Exception as k_exc:
+            logger.warning("Could not update keyboard to posted state: %s", k_exc)
+
+    display_plat = "ALL PLATFORMS" if platform == "all" else platform.upper()
+    await msg.reply_text(
+        f"✅ **Sent to Publisher!**\n\n"
+        f"• **Platform:** `{display_plat}`\n"
+        f"• **Clip:** #{clip_num}\n"
+        f"• **Status:** Publishing Triggered Successfully",
+        parse_mode="Markdown",
+    )
     return
 
 
