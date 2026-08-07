@@ -33,12 +33,30 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from pipeline.caption import render_captions
 from pipeline.composite import composite_clips
-from pipeline.download import extract_metadata, _get_cookie_opts, download_video_clip_range, YT_CLIENT_CHAINS, _kick_vod_get_hls_url
+from pipeline.download import (
+    extract_metadata,
+    _get_cookie_opts,
+    download_video_clip_range,
+    YT_CLIENT_CHAINS,
+    _kick_vod_get_hls_url,
+)
 from pipeline.errors import PipelineError
 from pipeline.score import Moment, score_moments, _generate_fallback_moments, verify_and_clean_visual_moments
 from pipeline.text_utils import mask_profanity
 
 logger = logging.getLogger(__name__)
+
+
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds to 'Xh Ym' or 'X mins'."""
+    sec = int(seconds)
+    if sec <= 0:
+        return "Live Stream 🔴"
+    hrs = sec // 3600
+    mins = (sec % 3600) // 60
+    if hrs > 0:
+        return f"{hrs}h {mins}m" if mins > 0 else f"{hrs}h"
+    return f"{mins} mins" if mins > 0 else f"{sec}s"
 
 _ASSETS_DIR = Path("assets")
 _HD_DOWNLOAD_SEM = None
