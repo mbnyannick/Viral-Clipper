@@ -738,30 +738,39 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
         await _safe_edit_message_reply_markup(query, reply_markup=posting_kb)
 
     video_url = ""
-    raw_caption = msg.caption if msg and msg.caption else ""
-    title_text, clean_caption = _extract_title_and_caption(raw_caption, clip_num)
-    extracted_hashtags = " ".join([w for w in clean_caption.split() if w.startswith("#")]) or "#Viral #Shorts"
-
     clips_dir = Path("tmp/clips")
     clips_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Fast local file lookup (sub-millisecond resolution)
-    matching_clips = list(clips_dir.glob(f"clip_*{clip_num}*.mp4")) + list(clips_dir.glob("*.mp4"))
-    if matching_clips:
-        video_url = f"https://150-136-108-208.sslip.io/clips/{matching_clips[0].name}"
-    elif msg and msg.video:
+    try:
+        c_num = int(clip_num)
+    except ValueError:
+        c_num = 1
+
+    # 1. Direct Telegram Video File resolution (100% exact match for the message tapped)
+    if msg and msg.video:
         try:
             safe_fid = "".join(c for c in msg.video.file_id if c.isalnum())[:20]
-            public_filename = f"clip_{safe_fid}.mp4"
+            public_filename = f"clip_msg_{safe_fid}.mp4"
             public_path = clips_dir / public_filename
             if not public_path.exists():
-                tg_file = await asyncio.wait_for(context.bot.get_file(msg.video.file_id), timeout=4.0)
-                await asyncio.wait_for(tg_file.download_to_drive(public_path), timeout=8.0)
-            video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
-            logger.info("Direct public video URL: %s", video_url)
+                tg_file = await asyncio.wait_for(context.bot.get_file(msg.video.file_id), timeout=6.0)
+                await asyncio.wait_for(tg_file.download_to_drive(public_path), timeout=12.0)
+            if public_path.exists() and public_path.stat().st_size > 1000:
+                video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
+                logger.info("  Direct Telegram file resolved: %s", video_url)
         except Exception as f_exc:
-            logger.warning("Could not download clip for public server: %s", f_exc)
-            video_url = f"https://150-136-108-208.sslip.io/clips/clip_{int(clip_num):03d}.mp4"
+            logger.warning("Could not download Telegram video file: %s", f_exc)
+
+    # 2. Strict clip number filename matching (never fallback to arbitrary old files in tmp/clips)
+    if not video_url:
+        matching_clips = [
+            f for f in clips_dir.glob("*.mp4")
+            if f"clip_{c_num:03d}" in f.name or f"clip_{c_num:02d}" in f.name or f"clip_{c_num}." in f.name or f"_{c_num:02d}." in f.name or f"_{c_num:03d}." in f.name
+        ]
+        if matching_clips:
+            video_url = f"https://150-136-108-208.sslip.io/clips/{matching_clips[0].name}"
+        else:
+            video_url = f"https://150-136-108-208.sslip.io/clips/clip_{c_num:03d}.mp4"
 
     def _post_json_sync(url: str, post_data: dict) -> tuple[int, str]:
         import json
@@ -1002,21 +1011,33 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         video_url = ""
         clips_dir = Path("tmp/clips")
         clips_dir.mkdir(parents=True, exist_ok=True)
-        matching_clips = list(clips_dir.glob(f"clip_*{clip_num}*.mp4")) + list(clips_dir.glob("*.mp4"))
-        if matching_clips:
-            video_url = f"https://150-136-108-208.sslip.io/clips/{matching_clips[0].name}"
-        elif msg and msg.video:
+        try:
+            c_num = int(clip_num)
+        except ValueError:
+            c_num = 1
+
+        if msg and msg.video:
             try:
                 safe_fid = "".join(c for c in msg.video.file_id if c.isalnum())[:20]
-                public_filename = f"clip_{safe_fid}.mp4"
+                public_filename = f"clip_msg_{safe_fid}.mp4"
                 public_path = clips_dir / public_filename
                 if not public_path.exists():
-                    tg_file = await asyncio.wait_for(context.bot.get_file(msg.video.file_id), timeout=4.0)
-                    await asyncio.wait_for(tg_file.download_to_drive(public_path), timeout=8.0)
-                video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
+                    tg_file = await asyncio.wait_for(context.bot.get_file(msg.video.file_id), timeout=6.0)
+                    await asyncio.wait_for(tg_file.download_to_drive(public_path), timeout=12.0)
+                if public_path.exists() and public_path.stat().st_size > 1000:
+                    video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
             except Exception as exc:
-                logger.warning("Scheduler: could not resolve video URL: %s", exc)
-                video_url = f"https://150-136-108-208.sslip.io/clips/clip_{int(clip_num):03d}.mp4"
+                logger.warning("Scheduler: could not resolve video URL from Telegram msg: %s", exc)
+
+        if not video_url:
+            matching_clips = [
+                f for f in clips_dir.glob("*.mp4")
+                if f"clip_{c_num:03d}" in f.name or f"clip_{c_num:02d}" in f.name or f"clip_{c_num}." in f.name or f"_{c_num:02d}." in f.name or f"_{c_num:03d}." in f.name
+            ]
+            if matching_clips:
+                video_url = f"https://150-136-108-208.sslip.io/clips/{matching_clips[0].name}"
+            else:
+                video_url = f"https://150-136-108-208.sslip.io/clips/clip_{c_num:03d}.mp4"
 
         platforms = ["tiktok", "instagram", "facebook", "youtube"] if sched_platform == "all" else [sched_platform]
 
