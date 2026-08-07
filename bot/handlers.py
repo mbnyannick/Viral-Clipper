@@ -738,6 +738,9 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
         await _safe_edit_message_reply_markup(query, reply_markup=posting_kb)
 
     video_url = ""
+    raw_caption = msg.caption if msg and msg.caption else ""
+    title_text, clean_caption = _extract_title_and_caption(raw_caption, clip_num)
+    extracted_hashtags = " ".join([w for w in clean_caption.split() if w.startswith("#")]) or "#Viral #Shorts"
     clips_dir = Path("tmp/clips")
     clips_dir.mkdir(parents=True, exist_ok=True)
 
