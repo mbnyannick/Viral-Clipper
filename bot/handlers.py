@@ -725,6 +725,7 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     chat_id = update.effective_chat.id
     msg = query.message if query else None
+    logger.info("⚡ [POST BUTTON TAPPED] platform=%s, clip_num=%s, chat_id=%s", platform, clip_num, chat_id)
 
     webhook_url = os.environ.get("MAKE_WEBHOOK_URL", "https://150-136-108-208.sslip.io/webhook/viral-post").strip()
     if not webhook_url:
@@ -872,8 +873,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if data.startswith("post:"):
-        if not update.effective_user or not _is_master_admin(update.effective_user.id):
-            await query.answer("🔒 Auto-Posting is restricted to the Admin's connected social media accounts.", show_alert=True)
+        if not update.effective_user or not _is_operator(update.effective_user.id):
+            await query.answer("🔒 Auto-Posting is restricted to approved users.", show_alert=True)
             return
         parts = data.split(":")
         platform = parts[1]
@@ -898,8 +899,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         if action == "confirm":
-            if not update.effective_user or not _is_master_admin(update.effective_user.id):
-                await query.answer("🔒 Only the Admin can schedule all clips.", show_alert=True)
+            if not update.effective_user or not _is_operator(update.effective_user.id):
+                await query.answer("🔒 Only approved users can schedule all clips.", show_alert=True)
                 return
 
             session_clips = _pending_schedule_sessions.get(chat_id, [])
