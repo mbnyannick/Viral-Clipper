@@ -316,8 +316,12 @@ async def _composite_one(
 
     def _build_sub_stage(sf: Path | str | None, en_sub: bool, af: str | None) -> str:
         has_sub = en_sub and sf and Path(sf).exists()
-        if has_sub:
-            # Single unified subtitle track (prevents dual drawtext + libass overlapping text)
+        if has_sub and af:
+            # Render Aura Word asterisk overlay in center (48% y) AND karaoke subtitles at bottom (82% y)
+            safe_sub = str(sf).replace(":", "\\:").replace("'", "\\'")
+            fonts_dir = str(Path("assets/fonts").resolve()).replace(":", "\\:").replace("'", "\\'")
+            return f"[out2]{af}[out_aura];[out_aura]subtitles='{safe_sub}':fontsdir='{fonts_dir}'[out]"
+        elif has_sub:
             safe_sub = str(sf).replace(":", "\\:").replace("'", "\\'")
             fonts_dir = str(Path("assets/fonts").resolve()).replace(":", "\\:").replace("'", "\\'")
             return f"[out2]subtitles='{safe_sub}':fontsdir='{fonts_dir}'[out]"
