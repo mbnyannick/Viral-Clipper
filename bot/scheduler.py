@@ -263,7 +263,11 @@ class PlatformScheduler:
             req = urllib.request.Request(
                 webhook_url,
                 data=data_bytes,
-                headers={"Content-Type": "application/json", "User-Agent": "ViralBot-Scheduler/1.0"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(data_bytes)),
+                    "User-Agent": "ViralBot-Scheduler/1.0",
+                },
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=20) as resp:

@@ -788,7 +788,11 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
         req = urllib.request.Request(
             url,
             data=data_bytes,
-            headers={"Content-Type": "application/json", "User-Agent": "ViralBot/1.0"},
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(data_bytes)),
+                "User-Agent": "ViralBot/1.0",
+            },
             method="POST"
         )
         with urllib.request.urlopen(req, timeout=10) as response:
