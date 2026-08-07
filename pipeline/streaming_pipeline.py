@@ -801,6 +801,21 @@ async def run_streaming_pipeline(
                 f"🎬 <b>Clip {clip_num:02d}</b> • {clean_streamer} [{mins}m{secs:02d}s]\n"
                 f"<i>{html.escape(caption_title)} {emoji}</i>"
             )
+            # Generate HD Cover Thumbnail capturing Aura Word (*FAIL*, *COOKED*) @ t=1.8s
+            try:
+                from pipeline.thumbnail import generate_cover_thumbnail
+                thumbs_dir = wdir / "thumbnails"
+                thumb_out = thumbs_dir / f"thumbnail_{m.index:02d}.jpg"
+                cap_png = captions[0] if captions else None
+                await generate_cover_thumbnail(final_path, m, thumb_out, cap_png, frame_ts=1.8)
+                
+                clips_public_dir = Path("tmp/clips")
+                clips_public_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(thumb_out, clips_public_dir / f"thumbnail_{m.index:02d}.jpg")
+                logger.info("  Generated Aura Cover Thumbnail for Stream Clip #%02d (t=1.8s)", clip_num)
+            except Exception as thumb_exc:
+                logger.warning("Thumbnail generation warning for stream clip #%02d: %s", clip_num, thumb_exc)
+
             if _is_admin_chat(chat_id):
                 action_keyboard = InlineKeyboardMarkup([
                     [
