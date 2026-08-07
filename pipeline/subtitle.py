@@ -397,16 +397,17 @@ def build_aura_keyword_filter(
     # Visibility: only show between t_start and t_end
     enable_expr = f"between(t,{t_start:.3f},{t_end:.3f})"
 
-    # Build complete drawtext filter — yellow text, thick black border, drop shadow
+    # Build complete drawtext filter — yellow text, 5px black stroke, 40% soft white glow
     drawtext_filter = (
         f"drawtext="
         f"{font_file_filter}"
         f"text='{safe_text}':"
         f"fontsize={font_size}:"
         f"fontcolor=yellow:"
-        f"borderw=6:"
+        f"borderw=5:"
         f"bordercolor=black:"
-        f"shadowx=4:shadowy=4:shadowcolor=black@0.9:"
+        f"shadowcolor=white@0.40:"
+        f"shadowx=0:shadowy=0:"
         f"x=(w-text_w)/2:"
         f"y={y_pos}-text_h/2:"
         f"enable='{enable_expr}'"
