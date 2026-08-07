@@ -238,12 +238,13 @@ def build_word_subtitle_filter(
         logger.info("  No word timestamps for clip [%.1f-%.1f] — skipping subtitles", clip_start, clip_end)
         return None, None
 
-    # Deduplicate consecutive identical words/timestamps
+    # Deduplicate consecutive identical words/timestamps within 1.2s (e.g. repeated stutters like HOW HOW)
     dedup_words = []
     for w in words:
+        clean_w = w["word"].strip(".,!?*#").lower()
         if dedup_words:
-            last = dedup_words[-1]
-            if w["word"] == last["word"] and abs(w["start"] - last["start"]) < 0.4:
+            last_w = dedup_words[-1]["word"].strip(".,!?*#").lower()
+            if clean_w == last_w and abs(w["start"] - dedup_words[-1]["start"]) < 1.2:
                 continue
         dedup_words.append(w)
     words = dedup_words
@@ -285,13 +286,15 @@ def build_word_subtitle_filter(
     )
     subs.styles["KaiStyle"] = style
 
+    last_event_end_ms = 0
     for idx, p in enumerate(phrases):
-        p_start_ms = int(p[0]["start"] * 1000)
-        p_end_ms = int(p[-1]["end"] * 1000)
+        p_start_ms = max(last_event_end_ms + 40, int(p[0]["start"] * 1000))
+        p_end_ms = max(p_start_ms + 150, int(p[-1]["end"] * 1000))
         if idx < len(phrases) - 1:
             next_start_ms = int(phrases[idx + 1][0]["start"] * 1000)
-            # Force current phrase to end at least 30ms before next phrase starts (prevents libass vertical stacking)
-            p_end_ms = min(p_end_ms, max(p_start_ms + 50, next_start_ms - 30))
+            if p_end_ms >= next_start_ms:
+                p_end_ms = max(p_start_ms + 100, next_start_ms - 40)
+        last_event_end_ms = p_end_ms
 
         karaoke_parts = []
         for i, w in enumerate(p):

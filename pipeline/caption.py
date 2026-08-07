@@ -179,9 +179,12 @@ def _draw_white_card(img: Image.Image, lines: list[str], emoji_str: str | None, 
     max_line_width = 0
     total_text_height = 0
 
+    SIDE_MARGIN = 36
+    MAX_CARD_WIDTH = CANVAS_W - (SIDE_MARGIN * 2)
+
     for idx, line in enumerate(plain_lines):
         font = headline_f if idx == 0 else normal_f
-        wrapped = _wrap_text(line, font, CANVAS_W - BOX_PAD_X * 2)
+        wrapped = _wrap_text(line, font, MAX_CARD_WIDTH - BOX_PAD_X * 2)
         for subline_idx, subline in enumerate(wrapped):
             tokens = [(t, f, False) for t, f in _build_tokens(subline, normal_f, bold_f)]
             if not tokens:
@@ -208,7 +211,9 @@ def _draw_white_card(img: Image.Image, lines: list[str], emoji_str: str | None, 
         return
 
     total_text_height += LINE_GAP * (len(rows) - 1)
-    box_width = max_line_width + BOX_PAD_X * 2
+    SIDE_MARGIN = 36
+    MAX_CARD_WIDTH = CANVAS_W - (SIDE_MARGIN * 2)
+    box_width = min(MAX_CARD_WIDTH, max_line_width + BOX_PAD_X * 2)
     box_height = total_text_height + BOX_PAD_Y * 2
     box_x = (CANVAS_W - box_width) // 2
     
