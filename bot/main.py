@@ -125,8 +125,23 @@ def main() -> None:
 
     async def _post_init(application) -> None:
         import asyncio
+        from telegram import BotCommand
         asyncio.create_task(run_scheduler_loop())
         logger.info("Peak-hour scheduler background task started.")
+        try:
+            cmd_list = [
+                BotCommand("start", "🚀 Start bot & view status"),
+                BotCommand("help", "📖 View usage guide & features"),
+                BotCommand("schedule", "📅 View peak-hour schedule & quotas"),
+                BotCommand("brief", "🔴 Set custom AI campaign rules"),
+                BotCommand("status", "⚙️ Check live job progress"),
+                BotCommand("stop", "⏹️ Cancel active processing job"),
+                BotCommand("clear", "🗑️ Clear pending schedule queue"),
+            ]
+            await application.bot.set_my_commands(cmd_list)
+            logger.info("Registered %d native Telegram slash commands!", len(cmd_list))
+        except Exception as cmd_exc:
+            logger.warning("Could not register Telegram slash commands: %s", cmd_exc)
 
     app.post_init = _post_init
 
