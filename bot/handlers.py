@@ -1192,6 +1192,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer("Streamer link not found.", show_alert=True)
             return
 
+        from pipeline.download import check_streamer_live_status
+        is_live, _, live_title = await check_streamer_live_status(target_url)
+
         _last_submitted_url[chat_id] = target_url
         _pending_links[chat_id] = {
             "url": target_url,
@@ -1199,11 +1202,15 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "context": context,
         }
         session = _pending_links[chat_id]
+
+        status_str = f"🔴 **LIVE NOW:** _{live_title}_" if (is_live and live_title) else ("🔴 **LIVE NOW**" if is_live else "📁 **Offline** (Clipping recorded content)")
+
         await _safe_edit_message_text(
             query,
             text=(
                 f"🔗 **Selected Streamer:** *{s_name}*\n"
-                f"URL: `{target_url}`\n\n"
+                f"• **Status:** {status_str}\n"
+                f"• **URL:** `{target_url}`\n\n"
                 f"📐 **Choose your canvas layout:**"
             ),
             reply_markup=_make_layout_keyboard(),
@@ -1539,7 +1546,7 @@ async def handle_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def handle_streamers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Command /streamers — Displays the Top 20 Viral Streamer Roster Dashboard."""
+    """Command /streamers — Displays the Top 20 Viral Streamer Roster Dashboard with live badges."""
     if not update.effective_user or not _is_operator(update.effective_user.id):
         await _handle_unapproved_user(update, context)
         return
@@ -1556,23 +1563,34 @@ async def handle_streamers(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text(f"⚠️ Error reading streamer roster: {exc}")
         return
 
+    status_msg = await update.message.reply_text("📡 <b>Checking real-time live status for Top 20 creators...</b> ⏳", parse_mode="HTML")
+
+    from pipeline.download import check_streamer_live_status
+    live_tasks = [check_streamer_live_status(s.get("url", "")) for s in streamers]
+    live_results = await asyncio.gather(*live_tasks, return_exceptions=True)
+
     text_lines = [
         "👑 <b>VIRAL Streamer Roster (Top 20 Creators in Your Niche)</b>\n\n"
-        "Tap any streamer's name below to open their channel, or tap a button to clip instantly:\n"
+        "🔴 = Live Now | ⚪ = Offline\n"
+        "Tap any streamer's name to view their channel, or tap a button to clip instantly:\n"
     ]
 
     keyboard = []
     row = []
 
-    for i, s in enumerate(streamers, start=1):
+    for i, (s, res) in enumerate(zip(streamers, live_results), start=1):
+        is_live, s_name, title = res if (isinstance(res, tuple) and len(res) == 3) else (False, s["name"], "")
         plat = "🟣" if s.get("platform") == "Twitch" else ("🟩" if s.get("platform") == "Kick" else "▶️")
+        live_badge = "🔴 <b>LIVE NOW</b>" if is_live else "⚪ Offline"
+        btn_icon = "🔴" if is_live else plat
         url = html.escape(s['url'])
         name = html.escape(s['name'])
         cat = html.escape(s.get('category', ''))
-        text_lines.append(f"{i:02d}. {plat} <a href=\"{url}\"><b>{name}</b></a> ({s.get('platform')})\n   • {cat}")
 
-        # Add 1-tap inline button for top streamers
-        row.append(InlineKeyboardButton(f"{plat} {s['name']}", callback_data=f"clip_streamer:{s['id']}"))
+        title_str = f" — <i>{html.escape(title[:30])}…</i>" if (is_live and title) else ""
+        text_lines.append(f"{i:02d}. {plat} <a href=\"{url}\"><b>{name}</b></a> ({s.get('platform')}) — {live_badge}{title_str}\n   • {cat}")
+
+        row.append(InlineKeyboardButton(f"{btn_icon} {s['name']}", callback_data=f"clip_streamer:{s['id']}"))
         if len(row) == 2:
             keyboard.append(row)
             row = []
@@ -1581,10 +1599,11 @@ async def handle_streamers(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         keyboard.append(row)
 
     full_msg = "\n\n".join(text_lines)
-    full_msg += "\n\n💡 <i>Tap any name to view their live stream, or tap a button below!</i>"
-    await update.message.reply_text(
+    full_msg += "\n\n💡 <i>Tap a button below to start clipping any streamer!</i>"
+
+    await status_msg.edit_text(
         full_msg,
-        reply_markup=InlineKeyboardMarkup(keyboard[:10]), # Show top 10 as 1-tap buttons
+        reply_markup=InlineKeyboardMarkup(keyboard[:10]),  # Top 10 as 1-tap buttons
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
