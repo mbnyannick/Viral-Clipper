@@ -198,27 +198,34 @@ async def run_pipeline(
             )
             return
 
-        # ── Kick VOD Smart Scan Mode ─────────────────────────────────────────────
-        # Instead of downloading the full VOD (hours of data), we audio-scan the
-        # entire VOD in parallel 10-min chunks, find viral timestamps via AI, then
-        # download ONLY the video segments that scored highest. Much faster.
-        is_kick_vod = "kick.com" in url.lower() and "/videos/" in url.lower()
-        if is_kick_vod:
-            # Fetch the real VOD duration from Kick API (yt-dlp always returns 0 for Kick)
-            try:
-                _, kick_channel, kick_title, kick_dur_sec = await _kick_vod_get_hls_url(url)
-                if kick_dur_sec > 0:
-                    duration_sec = float(kick_dur_sec)
-                    dur_display = format_duration(duration_sec)
-                if kick_title and not video_title:
-                    video_title = kick_title
-                if kick_channel and streamer_name in ("Streamer", ""):
-                    streamer_name = kick_channel.capitalize()
-            except Exception as kick_exc:
-                logger.warning("Could not prefetch Kick VOD metadata: %s", kick_exc)
+        # ── Smart Scan Mode (Twitch, Kick & YouTube VODs) ────────────────────────
+        # Instead of downloading full multi-hour video files, we audio-scan the
+        # VOD in parallel windows, find viral timestamps via AI & Spike Detection,
+        # then download ONLY the HD video segments that scored highest. Ultra fast.
+        u_lower = url.lower()
+        is_twitch_vod = "twitch.tv" in u_lower
+        is_kick_vod = "kick.com" in u_lower and "/videos/" in u_lower
+        is_youtube_vod = ("youtube.com" in u_lower or "youtu.be" in u_lower) and duration_sec > 600.0
+        is_smart_scan_vod = is_kick_vod or is_twitch_vod or is_youtube_vod
+
+        if is_smart_scan_vod:
+            if is_kick_vod:
+                try:
+                    _, kick_channel, kick_title, kick_dur_sec = await _kick_vod_get_hls_url(url)
+                    if kick_dur_sec > 0:
+                        duration_sec = float(kick_dur_sec)
+                        dur_display = format_duration(duration_sec)
+                    if kick_title and not video_title:
+                        video_title = kick_title
+                    if kick_channel and streamer_name in ("Streamer", ""):
+                        streamer_name = kick_channel.capitalize()
+                except Exception as kick_exc:
+                    logger.warning("Could not prefetch Kick VOD metadata: %s", kick_exc)
 
             vod_dur_sec = duration_sec if duration_sec > 0 else 18000.0
-            total_windows = max(1, int(vod_dur_sec / (streaming_chunk_min * 60)))
+            # For ultra-long VODs (>5h), scan the first 3 hours of peak stream content
+            scan_dur_sec = min(vod_dur_sec, 10800.0) if vod_dur_sec > 7200.0 else vod_dur_sec
+            total_windows = max(1, int(scan_dur_sec / (streaming_chunk_min * 60)))
 
             card_msg = (
                 f"🎬 **Video Details Identified:**\n"
@@ -228,9 +235,9 @@ async def run_pipeline(
                 f"• **Title:** {video_title if video_title else 'N/A'}\n"
                 f"• **Duration:** {dur_display}\n\n"
                 f"⚡ **Smart Scan Mode Active!**\n"
-                f"• Audio-scanning full VOD in {total_windows} parallel chunks\n"
-                f"• Only downloading the top viral segments\n"
-                f"• Estimated time: ~5–8 minutes ⚡"
+                f"• Audio-scanning VOD in {total_windows} parallel windows\n"
+                f"• Downloading ONLY the top viral video segments\n"
+                f"• First clip arriving in ~45 seconds ⚡"
             )
             await send_msg(card_msg)
 
