@@ -90,7 +90,17 @@ def _parse_url_fallback(url: str) -> str:
         name = m.group(1).capitalize()
         if name.lower() not in ("video", "videos", "clip", "clips"):
             return clean_streamer_name(name)
+    m_yt = re.search(r"youtube\.com/@([^/?#]+)", url, re.IGNORECASE)
+    if m_yt:
+        return clean_streamer_name(m_yt.group(1).replace("-", " ").replace("_", " ").title())
     return "Streamer"
+
+
+YT_CLIENT_CHAINS = [
+    ["--extractor-args", "youtube:player_client=android,mweb"],
+    ["--extractor-args", "youtube:player_client=web"],
+    [],
+]
 
 
 def normalize_kick_url(url: str) -> str:
@@ -486,6 +496,31 @@ async def extract_metadata(url: str) -> dict[str, str]:
     u_lower = url.lower()
     is_youtube = "youtu" in u_lower
     is_kick = "kick.com" in u_lower
+
+    # Fast-path for active live streams using browser TLS request engine
+    is_live_stream_url = (
+        (is_youtube and ("/@" in u_lower or "/c/" in u_lower or "/live" in u_lower) and "/videos" not in u_lower and "/watch" not in u_lower)
+        or (is_kick and "/videos/" not in u_lower and "clips" not in u_lower)
+        or ("twitch.tv" in u_lower and "/videos/" not in u_lower and "/v/" not in u_lower and "clips" not in u_lower)
+    )
+    if is_live_stream_url:
+        try:
+            is_live, streamer_b, title_b = await check_streamer_live_status(url)
+            if is_live or streamer_b:
+                platform, content_type, live_status = detect_platform_and_type(url, is_live_flag="true" if is_live else "")
+                logger.info("Fast-path metadata resolved via browser engine: streamer='%s', title='%s', live=%s", streamer_b, title_b, is_live)
+                return {
+                    "streamer": streamer_b or _parse_url_fallback(url),
+                    "title": title_b or "",
+                    "duration": "0",
+                    "platform": platform,
+                    "content_type": content_type,
+                    "live_status": "🔴 LIVE NOW" if is_live else "📁 Recorded Content",
+                    "is_offline": False,
+                    "effective_url": url,
+                }
+        except Exception as fast_exc:
+            logger.warning("Browser fast-path metadata check exception: %s", fast_exc)
 
     yt_client_chains = YT_CLIENT_CHAINS if is_youtube else [[]]
 
