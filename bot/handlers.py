@@ -1173,6 +1173,38 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await _launch_job(chat_id, 10, edit_message=query.message)
         return
 
+    if data.startswith("clip_streamer:"):
+        streamer_id = data.split("clip_streamer:")[1]
+        roster_path = Path("config/streamer_roster.json")
+        target_url = None
+        s_name = "Streamer"
+        if roster_path.exists():
+            try:
+                rdata = json.loads(roster_path.read_text())
+                for s in rdata.get("streamers", []):
+                    if s.get("id") == streamer_id:
+                        target_url = s.get("url")
+                        s_name = s.get("name", "Streamer")
+                        break
+            except Exception:
+                pass
+        if not target_url:
+            await query.answer("Streamer link not found.", show_alert=True)
+            return
+
+        session = _create_new_session(chat_id, target_url)
+        await _safe_edit_message_text(
+            query,
+            text=(
+                f"🔗 **Selected Streamer:** *{s_name}*\n"
+                f"URL: `{target_url}`\n\n"
+                f"📐 **Choose your canvas layout:**"
+            ),
+            reply_markup=_make_layout_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
+
     if data.startswith("fmt:"):
         layout_mode = data.split("fmt:")[1]
         session = _get_or_recover_session(chat_id, update, query, context)
@@ -1520,20 +1552,36 @@ async def handle_streamers(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     text_lines = [
         "👑 <b>VIRAL Streamer Roster (Top 20 Creators in Your Niche)</b>\n\n"
-        "Tap any streamer's link below to copy and start clipping instantly:\n"
+        "Tap any streamer's name below to open their channel, or tap a button to clip instantly:\n"
     ]
+
+    keyboard = []
+    row = []
 
     for i, s in enumerate(streamers, start=1):
         plat = "🟣" if s.get("platform") == "Twitch" else ("🟩" if s.get("platform") == "Kick" else "▶️")
-        text_lines.append(
-            f"{i:02d}. {plat} <b>{html.escape(s['name'])}</b> ({s.get('platform')})\n"
-            f"   • {html.escape(s.get('category', ''))}\n"
-            f"   • 🔗 <code>{s['url']}</code>"
-        )
+        url = html.escape(s['url'])
+        name = html.escape(s['name'])
+        cat = html.escape(s.get('category', ''))
+        text_lines.append(f"{i:02d}. {plat} <a href=\"{url}\"><b>{name}</b></a> ({s.get('platform')})\n   • {cat}")
+
+        # Add 1-tap inline button for top streamers
+        row.append(InlineKeyboardButton(f"{plat} {s['name']}", callback_data=f"clip_streamer:{s['id']}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+
+    if row:
+        keyboard.append(row)
 
     full_msg = "\n\n".join(text_lines)
-    full_msg += "\n\n💡 <i>Copy and paste any link above into this chat to start clipping!</i>"
-    await update.message.reply_text(full_msg, parse_mode="HTML")
+    full_msg += "\n\n💡 <i>Tap any name to view their live stream, or tap a button below!</i>"
+    await update.message.reply_text(
+        full_msg,
+        reply_markup=InlineKeyboardMarkup(keyboard[:10]), # Show top 10 as 1-tap buttons
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
 
 
 
