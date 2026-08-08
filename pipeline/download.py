@@ -97,8 +97,9 @@ def _parse_url_fallback(url: str) -> str:
 
 
 YT_CLIENT_CHAINS = [
-    ["--extractor-args", "youtube:player_client=android,mweb"],
-    ["--extractor-args", "youtube:player_client=web"],
+    ["--extractor-args", "youtube:player_client=ios,mweb"],
+    ["--extractor-args", "youtube:player_client=mweb,web"],
+    ["--extractor-args", "youtube:player_client=ios,android"],
     [],
 ]
 
