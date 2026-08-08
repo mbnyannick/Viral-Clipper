@@ -685,7 +685,7 @@ async def download(url: str, output_dir: Path, streamer_info: dict | None = None
                 cmd = [
                     "yt-dlp",
                     "--no-check-certificates",
-                    "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+                    "-f", "bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height>=1080]+bestaudio/best[height>=1080]/best",
                     "--merge-output-format", "mp4",
                     "--no-playlist",
                     "--remote-components", "ejs:github",
@@ -852,7 +852,7 @@ async def download_video_clip_range(
             "-N", "8",
             "--concurrent-fragments", "8",
             "--download-sections", section,
-            "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "-f", "bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height>=1080]+bestaudio/best[height>=1080]/best",
             "--merge-output-format", "mp4",
             "--force-overwrites",
             "-o", str(output_path),

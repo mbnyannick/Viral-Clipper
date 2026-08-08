@@ -389,7 +389,7 @@ async def run_pipeline(
                 logger.info("Smart Auto: Selected 'face_crop' (MediaPipe Face Tracking) for <=60s clip")
 
         # ── 5. Cut, Render & Composite with Progressive Delivery ──────────────────────────
-        await update_status(f"✂️ 4/5 — Compositing {len(moments)} Clips & Generating AI Voiceover...")
+        await update_status(f"✂️ 4/5 — Compositing {len(moments)} Clips...")
         clips_dir = run_dir / "clips"
         clips = await cut_clips(video_path, moments, clips_dir, url=url)
 

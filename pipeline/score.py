@@ -35,7 +35,6 @@ class Moment:
     reasoning: str = ""   # 1-sentence explanation of why it's viral
     title: str = ""       # YouTube Shorts title (≤50 chars, curiosity-gap style)
     hashtags: str = ""    # 6 to 10 highly relevant topic hashtags (e.g. #Streamer #Topic #ViralClips)
-    voiceover: str = ""   # 1-sentence hook narration commentary for AI TTS
     bgm_track: str = "none" # "hype", "suspense", "funny", "sad", or "none"
     sfx_events: list[dict] = field(default_factory=list)
     aura_word: str = ""   # Single cinematic keyword that defines this clip's energy (e.g. COOKED, AURA, IMPRESSED)
@@ -128,12 +127,6 @@ The selector's primary objective is: Find self-contained mini-stories that hook 
    - Prefer (Short Setup + Immediate Payoff) over (Long Setup + Slightly Better Payoff).
    - Ensure anyone who has NEVER seen this streamer before can watch the clip and immediately understand: "Oh, this is what is going on!"
 
-GEN Z HUMOR & VOICEOVER STYLE RULE (MANDATORY):
-15. GEN Z HUMOR & FUNNY NARRATION: For every clip's "voiceover" field, write a HILARIOUS, witty 1-sentence Gen Z commentary hook (12 to 18 words max).
-    - Tone: Witty, funny, sarcastic, unhinged, or hyped Gen Z humor.
-    - Gen Z Slang: Use natural Gen Z phrasing like "ain't no way", "bro was NOT ready", "cooked in 4k", "no shot", "he really thought", "lowkey wild", "out of line", "unhinged behavior".
-    - Length: Exactly 1 punchy sentence (~3.0 to 4.5 seconds spoken duration). Never make it too long or verbose!
-
 Return ONLY a valid JSON array with exactly {top_n} objects. No markdown, no explanation, just raw JSON.
 
 Each object must have exactly these fields:
@@ -148,7 +141,6 @@ Each object must have exactly these fields:
   "reasoning"     — string, a punchy 1-sentence explanation of why Hook -> Event -> Payoff is complete
   "title"         — string, SHORT curiosity-gap YouTube Shorts title (MAXIMUM 50 chars including emoji, e.g. "Kai Is COOKED 💀", "He Did WHAT?! 😱", "Bro SNAPPED 😤")
   "hashtags"      — string, 6 to 10 highly relevant, topic-specific viral hashtags separated by spaces (e.g. "#{streamer} #StreamerDrama #FunnyClips #KickHighlights #ViralShorts")
-  "voiceover"     — string, Hilarious 1-sentence Gen Z commentary hook (12-18 words max, e.g. "Ain't no way bro thought he was getting away with this live in 4K...")
   "aura_word"     — string, ONE single ALL CAPS word capturing this clip's energy (e.g. "COOKED", "AURA", "IMPRESSED", "CAUGHT", "DEAD", "WILD", "REAL", "WHO", "NOPE")
 """
 
@@ -270,7 +262,6 @@ async def score_moments(
                         reasoning=item.get("reason", item.get("reasoning", "Strong Hook -> Event -> Payoff arc.")),
                         title=item.get("title", " ".join(item.get("caption_lines", []))),
                         hashtags=item.get("hashtags", f"#{display_streamer.replace(' ', '')} #StreamerHighlights #KickClips #TikTokViral #ReelsTrends #Shorts"),
-                        voiceover=item.get("voiceover", ""),
                         bgm_track=item.get("bgm_track", "hype"),
                         sfx_events=list(item.get("sfx_events", [])),
                         aura_word=str(item.get("aura_word", "")).upper().strip(),

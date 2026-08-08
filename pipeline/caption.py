@@ -19,8 +19,8 @@ from .text_utils import mask_profanity
 
 logger = logging.getLogger(__name__)
 
-CANVAS_W: int = 720
-CANVAS_H: int = 1280
+CANVAS_W: int = 1080
+CANVAS_H: int = 1920
 
 MAIN_FONT_SIZE = 38
 SECONDARY_FONT_SIZE = 32

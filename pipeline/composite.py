@@ -12,6 +12,7 @@ Supports two layout modes:
 
 import asyncio
 import logging
+import os
 import shutil
 import subprocess
 import typing
@@ -26,12 +27,17 @@ logger = logging.getLogger(__name__)
 
 import cv2
 
-CANVAS_W = 720
-CANVAS_H = 1280
+CANVAS_W = 1080
+CANVAS_H = 1920
 GAP_PX = 36
 CAPTION_OVERLAP = 60   # px the caption overlaps INTO the top of the video frame @ 1080p
 
 _COMPOSITE_CONCURRENCY = 2
+
+
+def voiceover_generation_enabled() -> bool:
+    """Public workflow policy: voiceover generation is never allowed in composition."""
+    return False
 
 
 def _detect_action_motion_peak(clip_path: Path) -> float:
@@ -221,44 +227,47 @@ async def _composite_one(
     # Clean, natural studio profile (matches the BEFORE look — no harsh contrast, over-sharpening, or artificial saturation)
     COLOR_ENHANCE = "eq=contrast=1.00:brightness=0.00:saturation=1.00"
 
-    # ── 1. AI Voiceover generation ───────────────────────────────────────────
-
+    # ── 1. Voiceover policy is hard-disabled for the workflow ───────────────
     vo_path = output_dir / f"vo_{moment.index:02d}.mp3"
     vo_file = None
     vo_dur = 0.0
-    vo_script = getattr(moment, "voiceover", None)
-    if not vo_script or not str(vo_script).strip():
-        from .score import clean_streamer_name
-        clean_s = clean_streamer_name(getattr(moment, "streamer", "Streamer"))
-        clean_t = getattr(moment, "title", "") or " ".join(getattr(moment, "caption_lines", []))
-        if not clean_t:
-            clean_t = "this moment"
-        templates = [
-            f"Ain't no way {clean_s} reacted like this when {clean_t.lower()} happened...",
-            f"Bro really thought {clean_s} was going to let this slide live on stream...",
-            f"Watch what happened the exact second {clean_s} saw this unfold...",
-            f"No shot {clean_s} actually said this live on stream with a straight face...",
-            f"Look at how the entire chat lost their mind when {clean_s} did this...",
-        ]
-        vo_script = templates[moment.index % len(templates)]
-    try:
-        from .voiceover import generate_voiceover
-        vo_file = await generate_voiceover(str(vo_script), vo_path)
-        if vo_file and vo_file.exists() and vo_file.stat().st_size > 1000:
-            res = subprocess.run(
-                ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(vo_file)],
-                capture_output=True, text=True, check=True, timeout=5
-            )
-            vo_dur = float(res.stdout.strip())
-            logger.info("  Voiceover hook duration: %.2fs (teaser concat + 100%% lip sync offset)", vo_dur)
-        elif vo_file and vo_file.exists():
-            try:
-                vo_file.unlink(missing_ok=True)
-            except Exception:
-                pass
-            vo_file = None
-    except Exception as vo_exc:
-        logger.warning("Voiceover generation exception: %s", vo_exc)
+
+    if voiceover_generation_enabled():
+        vo_script = getattr(moment, "voiceover", None)
+        if not vo_script or not str(vo_script).strip():
+            from .score import clean_streamer_name
+            clean_s = clean_streamer_name(getattr(moment, "streamer", "Streamer"))
+            clean_t = getattr(moment, "title", "") or " ".join(getattr(moment, "caption_lines", []))
+            if not clean_t:
+                clean_t = "this moment"
+            templates = [
+                f"Ain't no way {clean_s} reacted like this when {clean_t.lower()} happened...",
+                f"Bro really thought {clean_s} was going to let this slide live on stream...",
+                f"Watch what happened the exact second {clean_s} saw this unfold...",
+                f"No shot {clean_s} actually said this live on stream with a straight face...",
+                f"Look at how the entire chat lost their mind when {clean_s} did this...",
+            ]
+            vo_script = templates[moment.index % len(templates)]
+        try:
+            from .voiceover import generate_voiceover
+            vo_file = await generate_voiceover(str(vo_script), vo_path)
+            if vo_file and vo_file.exists() and vo_file.stat().st_size > 1000:
+                res = subprocess.run(
+                    ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(vo_file)],
+                    capture_output=True, text=True, check=True, timeout=5
+                )
+                vo_dur = float(res.stdout.strip())
+                logger.info("  Voiceover hook duration: %.2fs (teaser concat + 100%% lip sync offset)", vo_dur)
+            elif vo_file and vo_file.exists():
+                try:
+                    vo_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                vo_file = None
+        except Exception as vo_exc:
+            logger.warning("Voiceover generation exception: %s", vo_exc)
+    else:
+        logger.info("  Voiceover generation is globally disabled for this workflow run.")
 
     # ── 2. Mood-matched BGM selection ─────────────────────────────────────────
     bgm_dir = Path("assets/bgm")
@@ -360,7 +369,7 @@ async def _composite_one(
         )
     elif "blur" in layout_mode or layout_mode == "blurred_frame":
         logger.info(
-            "  Compositing clip %02d (%s 720x1280, crop=%s, wm_y=%d)",
+            "  Compositing clip %02d (%s 1080x1920, crop=%s, wm_y=%d)",
             moment.index, layout_mode, "1:1" if is_square else "4:3", wm_y,
         )
         sub_stage = _build_sub_stage(sub_file, enable_subtitles, aura_filter)

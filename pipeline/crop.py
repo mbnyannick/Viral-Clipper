@@ -120,7 +120,7 @@ async def detect_crop_offset(clip_path: Path) -> str:
 def _detect_dynamic_crop_sync(clip_path: Path) -> str:
     cap = cv2.VideoCapture(str(clip_path))
     if not cap.isOpened():
-        return "crop=ih*9/16:ih:(iw-ow)/2:0,scale=720:1280"
+        return "crop=ih*9/16:ih:(iw-ow)/2:0,scale=1080:1920"
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -129,13 +129,13 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
 
     if width == 0 or height == 0:
         cap.release()
-        return "crop=ih*9/16:ih:(iw-ow)/2:0,scale=720:1280"
+        return "crop=ih*9/16:ih:(iw-ow)/2:0,scale=1080:1920"
 
     # Target 9:16 crop width for the frame's height
     crop_w = int(height * 9 / 16)
     if crop_w >= width:
         cap.release()
-        return "scale=720:1280"
+        return "scale=1080:1920"
 
     default_x = max(0, (width - crop_w) // 2)
     step_frames = max(1, int(fps))  # sample 1 frame per second for high-performance detection
@@ -226,7 +226,7 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
 
     if not seats:
         logger.warning("No faces detected in %s, falling back to static center crop.", clip_path.name)
-        return f"crop=ih*9/16:ih:{default_x}:0,scale=720:1280"
+        return f"crop=ih*9/16:ih:{default_x}:0,scale=1080:1920"
 
     # Active Speaker Detection (ASD) via Rolling Window Face Size Variance
     # Window size: 1.5 seconds
@@ -267,7 +267,7 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
             points.append((sec, target_x))
 
     if not points:
-        return f"crop=ih*9/16:ih:{default_x}:0,scale=720:1280"
+        return f"crop=ih*9/16:ih:{default_x}:0,scale=1080:1920"
 
     # Simplify points: only generate a cut when the active speaker actually changes
     simplified_points = []
@@ -296,7 +296,7 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
     expr_str = "+".join(expr_parts)
 
     logger.info("Face tracking for %s: Generated %d dynamic camera jump-cuts!", clip_path.name, len(simplified_points)-1)
-    return f"crop=ih*9/16:ih:'{expr_str}':0,scale=720:1280"
+    return f"crop=ih*9/16:ih:'{expr_str}':0,scale=1080:1920"
 
 
 def verify_visual_hook_alignment(video_path: Path | str, start_ts: float) -> float:

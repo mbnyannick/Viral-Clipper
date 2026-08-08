@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_VOICE = os.environ.get("VOICEOVER_SPEAKER", "onyx").strip()  # "onyx" = deep studio male narrator voice
+
+
+def voiceover_generation_enabled() -> bool:
+    """Workflow policy: voiceover narration is permanently disabled."""
+    return False
+
+
 async def generate_voiceover(text: str, output_path: Path, voice: str | None = None) -> Path | None:
     """
     Synthesizes `text` to an MP3 audio file at `output_path`.
@@ -27,8 +34,8 @@ async def generate_voiceover(text: str, output_path: Path, voice: str | None = N
     """
     if not text or not text.strip():
         return None
-    if os.environ.get("ENABLE_VOICEOVER", "true").lower() in ("false", "off", "0", "no"):
-        logger.info("Voiceover disabled via ENABLE_VOICEOVER=false")
+    if not voiceover_generation_enabled():
+        logger.info("Voiceover disabled via workflow policy (ENABLE_VOICEOVER=false)")
         return None
 
     clean_text = text.strip()

@@ -15,6 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from pipeline.score import score_moments, Moment, _format_transcript
 from pipeline.errors import PipelineError
+from pipeline.voiceover import generate_voiceover
+from pipeline.composite import voiceover_generation_enabled
 
 # ── Fixtures ────────────────────────────────────────────────────────────────────
 
@@ -143,3 +145,17 @@ async def test_score_moments_truncates_to_top_n():
         assert len(moments) == 3
     finally:
         patcher.stop()
+
+
+def test_voiceover_generation_disabled_by_default(monkeypatch):
+    """The workflow-level policy should default to disabling TTS voiceover synthesis."""
+    monkeypatch.delenv("ENABLE_VOICEOVER", raising=False)
+    assert voiceover_generation_enabled() is False
+
+async def test_voiceover_generation_disabled_by_default(tmp_path, monkeypatch):
+    """The runtime policy should shut off voiceover synthesis unless explicitly re-enabled."""
+    monkeypatch.delenv("ENABLE_VOICEOVER", raising=False)
+    out = tmp_path / "voiceover.mp3"
+    result = await generate_voiceover("This is a hook", out)
+    assert result is None
+    assert not out.exists()
