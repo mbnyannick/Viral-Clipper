@@ -689,9 +689,10 @@ async def run_streaming_pipeline(
     )
 
     u_lower = url.lower()
-    platform_name = "Kick" if "kick.com" in u_lower else ("Twitch" if "twitch.tv" in u_lower else ("YouTube" if "youtu" in u_lower else "Video"))
-    live_stat = "Recorded VOD"
-    dur_str = format_duration(stream_end_sec - stream_start_sec) if stream_end_sec else ""
+    is_live_now = (dvr_duration <= 0 or ("kick.com" in u_lower and not ("/videos/" in u_lower or "clips" in u_lower)))
+    platform_name = "Kick 🟩" if "kick.com" in u_lower else ("Twitch 🟣" if "twitch.tv" in u_lower else ("YouTube ▶️" if "youtu" in u_lower else "Video 🌐"))
+    live_stat = "🔴 LIVE NOW" if is_live_now else "📁 Recorded VOD"
+    dur_str = "Live Stream 🔴" if is_live_now else (format_duration(stream_end_sec - stream_start_sec) if stream_end_sec else "")
 
     tracker = _ProgressTracker(
         bot=bot,

@@ -203,20 +203,6 @@ async def run_pipeline(
         is_vod_or_clip = ("/videos/" in u_lower or "/v/" in u_lower or "clips" in u_lower)
 
         if is_live_stream and not is_vod_or_clip:
-            card_msg = (
-                f"🎬 **Video Details Identified:**\n"
-                f"• **Platform:** {platform}\n"
-                f"• **Live Status:** 🔴 LIVE NOW\n"
-                f"• **Streamer:** {streamer_name}\n"
-                f"• **Title:** {video_title if video_title else 'N/A'}\n"
-                f"• **Duration:** Live Stream 🔴\n\n"
-                f"⚡ **Live Stream Clipping Active!**\n"
-                f"• Audio-scanning last 60 minutes of live stream...\n"
-                f"• Downloading ONLY the top viral video segments\n"
-                f"• First clip arriving in ~45 seconds ⚡"
-            )
-            await send_msg(card_msg)
-
             notifier.stop()
             if chat_id in active_run_status:
                 active_run_status[chat_id]["step"] = "Live stream: parallel audio scan..."
@@ -266,20 +252,6 @@ async def run_pipeline(
             # For ultra-long VODs (>5h), scan the first 3 hours of peak stream content
             scan_dur_sec = min(vod_dur_sec, 10800.0) if vod_dur_sec > 7200.0 else vod_dur_sec
             total_windows = max(1, int(scan_dur_sec / (streaming_chunk_min * 60)))
-
-            card_msg = (
-                f"🎬 **Video Details Identified:**\n"
-                f"• **Platform:** {platform}\n"
-                f"• **Live Status:** 📁 Recorded VOD\n"
-                f"• **Streamer:** {streamer_name}\n"
-                f"• **Title:** {video_title if video_title else 'N/A'}\n"
-                f"• **Duration:** {dur_display}\n\n"
-                f"⚡ **Smart Scan Mode Active!**\n"
-                f"• Audio-scanning VOD in {total_windows} parallel windows\n"
-                f"• Downloading ONLY the top viral video segments\n"
-                f"• First clip arriving in ~45 seconds ⚡"
-            )
-            await send_msg(card_msg)
 
             notifier.stop()
             if chat_id in active_run_status:
