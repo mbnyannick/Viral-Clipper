@@ -420,13 +420,33 @@ async def _launch_job(chat_id: int, num_clips: int, target_duration: str = "auto
         f"🚀 **Video processing has started!** Please wait while clips are generated and composited... ⏳"
     )
 
-    if edit_message:
+    # Safely send/edit the status message — works for both inline buttons (callback)
+    # and direct message flows (orig_update.message may be None for callback queries)
+    async def _send_status(text: str) -> None:
+        """Send status text, preferring edit_message then orig_update.message then bot.send_message."""
+        if edit_message:
+            try:
+                await edit_message.edit_text(text, parse_mode="Markdown")
+                return
+            except Exception:
+                pass
+        orig_msg = getattr(orig_update, "message", None)
+        if orig_msg:
+            try:
+                await orig_msg.reply_text(text, parse_mode="Markdown")
+                return
+            except Exception:
+                pass
+        # Last resort: send via bot directly
         try:
-            await edit_message.edit_text(status_text, parse_mode="Markdown")
-        except Exception:
-            await orig_update.message.reply_text(status_text, parse_mode="Markdown")
-    else:
-        await orig_update.message.reply_text(status_text, parse_mode="Markdown")
+            from telegram import Bot as _Bot
+            bot_obj = getattr(orig_context, "bot", None) if orig_context else None
+            if bot_obj:
+                await bot_obj.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+        except Exception as _e:
+            logger.warning("_launch_job: could not send status msg: %s", _e)
+
+    await _send_status(status_text)
 
     _ensure_worker_running()
     is_user_active = (chat_id in _active_tasks_by_chat) and not _active_tasks_by_chat[chat_id][0].done()
@@ -437,9 +457,8 @@ async def _launch_job(chat_id: int, num_clips: int, target_duration: str = "auto
             1 for item in list(_job_queue._queue)
             if item[1] and item[1].effective_chat and item[1].effective_chat.id == chat_id
         )
-        await orig_update.message.reply_text(
-            f"📥 **Added to your queue!** (Position #{user_pos})\n\nProcessing will start automatically once your active video completes."
-        )
+        queue_msg = f"📥 **Added to your queue!** (Position #{user_pos})\n\nProcessing will start automatically once your active video completes."
+        await _send_status(queue_msg)
 
 
 async def _queue_worker() -> None:

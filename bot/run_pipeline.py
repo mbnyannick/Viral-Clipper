@@ -100,13 +100,37 @@ async def run_pipeline(
     run_dir = _BASE_TMP / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # Pre-seed status with URL-derived metadata so /status never shows empty info
+    _pre_streamer = "Streamer"
+    _pre_platform = "Video"
+    _pre_title = "N/A"
+    _u_lower = url.lower()
+    if "kick.com" in _u_lower:
+        _pre_platform = "Kick 🟢"
+        _pre_streamer = url.rstrip("/").split("/")[-1].capitalize()
+    elif "twitch.tv" in _u_lower:
+        _pre_platform = "Twitch 💜"
+        _pre_streamer = url.rstrip("/").split("/")[-1].capitalize()
+    elif "youtube.com" in _u_lower or "youtu.be" in _u_lower:
+        _pre_platform = "YouTube 🔴"
+        _seg = [s for s in url.rstrip("/").split("/") if s and not s.startswith("http") and s not in ("www.youtube.com", "youtube.com", "youtu.be", "live", "@IShowSpeed")]
+        # Extract handle or channel name
+        for seg in url.split("/"):
+            if seg.startswith("@"):
+                _pre_streamer = seg[1:].replace("-", " ").replace("_", " ").title()
+                break
+
     active_run_status[chat_id] = {
         "chat_id": chat_id,
         "url": url,
         "layout_mode": layout_mode,
         "start_time": time.time(),
         "step": "Analyzing Link & Extracting Metadata...",
-        "streamer_info": {},
+        "streamer_info": {
+            "streamer": _pre_streamer,
+            "platform": _pre_platform,
+            "title": _pre_title,
+        },
     }
 
     logger.info("=== Pipeline run %s started for %s (mode=%s) ===", run_id, url, layout_mode)
@@ -122,7 +146,13 @@ async def run_pipeline(
 
     try:
         # ── 1. Metadata Extraction FIRST (Fast 1-2s query) ──────────────────────
-        streamer_info = await extract_metadata(url)
+        # For YouTube channel handle URLs, append /live so yt-dlp resolves fast
+        meta_url = url
+        if ("youtube.com/@" in url or "youtube.com/c/" in url) and "/live" not in url and "/watch" not in url and "/videos" not in url:
+            meta_url = url.rstrip("/") + "/live"
+            logger.info("YouTube channel URL → using /live for fast metadata: %s", meta_url)
+
+        streamer_info = await extract_metadata(meta_url)
         if chat_id in active_run_status:
             active_run_status[chat_id]["streamer_info"] = streamer_info
 
