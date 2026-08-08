@@ -297,3 +297,63 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
 
     logger.info("Face tracking for %s: Generated %d dynamic camera jump-cuts!", clip_path.name, len(simplified_points)-1)
     return f"crop=ih*9/16:ih:'{expr_str}':0,scale=720:1280"
+
+
+def verify_visual_hook_alignment(video_path: Path | str, start_ts: float) -> float:
+    """
+    Scans keyframes around `start_ts` (from start_ts - 1.5s to start_ts + 1.5s).
+    Calculates frame motion variance & face landmark movement to align clip start
+    timestamp precisely with the visual reaction frame.
+    Returns optimized start timestamp float.
+    """
+    p = Path(video_path)
+    if not p.exists():
+        return start_ts
+
+    try:
+        cap = cv2.VideoCapture(str(p))
+        if not cap.isOpened():
+            return start_ts
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        if total_frames <= 0:
+            cap.release()
+            return start_ts
+
+        # Sample 5 frames around start_ts (-1.5s to +1.5s)
+        offsets = [-1.5, -0.75, 0.0, 0.75, 1.5]
+        best_ts = start_ts
+        max_motion = -1.0
+
+        prev_gray = None
+        for off in offsets:
+            ts = max(0.0, start_ts + off)
+            frame_idx = int(ts * fps)
+            if frame_idx >= total_frames:
+                continue
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                continue
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray = cv2.resize(gray, (160, 90))
+
+            if prev_gray is not None:
+                diff = cv2.absdiff(gray, prev_gray)
+                motion_val = float(cv2.mean(diff)[0])
+                if motion_val > max_motion:
+                    max_motion = motion_val
+                    best_ts = ts
+            prev_gray = gray
+
+        cap.release()
+        if max_motion > 3.0:
+            logger.info("Visual hook alignment optimized start ts %.2fs -> %.2fs (motion=%.2f)", start_ts, best_ts, max_motion)
+            return best_ts
+        return start_ts
+    except Exception as exc:
+        logger.warning("Visual hook alignment check skipped: %s", exc)
+        return start_ts

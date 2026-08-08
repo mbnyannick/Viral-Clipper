@@ -305,7 +305,7 @@ def verify_and_clean_visual_moments(moments: list[Moment], video_path: Path | st
         return moments
 
     try:
-        from .crop import analyze_keyframe_visuals
+        from .crop import analyze_keyframe_visuals, verify_visual_hook_alignment
         cleaned = []
         for m in moments:
             has_overlay, motion = analyze_keyframe_visuals(Path(video_path), m.start)
@@ -316,6 +316,9 @@ def verify_and_clean_visual_moments(moments: list[Moment], video_path: Path | st
                 )
                 m.start += 4.0  # Shift past the Subscribe popup banner
                 m.end = max(m.start + 15.0, m.end + 2.0)
+
+            # Optimize clip start timestamp using visual reaction keyframe alignment
+            m.start = verify_visual_hook_alignment(Path(video_path), m.start)
             cleaned.append(m)
         return cleaned
     except Exception as exc:
