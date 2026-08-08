@@ -1192,7 +1192,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer("Streamer link not found.", show_alert=True)
             return
 
-        session = _create_new_session(chat_id, target_url)
+        _last_submitted_url[chat_id] = target_url
+        _pending_links[chat_id] = {
+            "url": target_url,
+            "update": update,
+            "context": context,
+        }
+        session = _pending_links[chat_id]
         await _safe_edit_message_text(
             query,
             text=(
