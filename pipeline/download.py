@@ -116,6 +116,42 @@ def _parse_kick_vod_id(url: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+async def check_streamer_live_status(url: str) -> tuple[bool, str, str]:
+    """
+    Fast, zero-API live status check for Twitch, Kick, and YouTube channels.
+    Returns (is_live: bool, streamer_name: str, stream_title: str).
+    """
+    u = url.lower()
+    streamer_name = _parse_url_fallback(url)
+
+    if "kick.com" in u and not ("/videos/" in u or "clips" in u):
+        m = re.search(r"kick\.com/([^/?#]+)", url, re.IGNORECASE)
+        if m:
+            channel = m.group(1)
+            api_url = f"https://kick.com/api/v2/channels/{channel}"
+            try:
+                from curl_cffi import requests as cffi_requests
+                r = cffi_requests.get(api_url, impersonate="chrome", timeout=10)
+                if r.status_code == 200:
+                    data = r.json()
+                    livestream = data.get("livestream")
+                    if livestream and isinstance(livestream, dict):
+                        is_live = bool(livestream.get("id") or livestream.get("is_live", True))
+                        title = livestream.get("session_title", "")
+                        return is_live, channel.capitalize(), title
+            except Exception as exc:
+                logger.warning("Kick live check error for %s: %s", channel, exc)
+
+    try:
+        info = await extract_metadata(url)
+        is_live = not info.get("is_offline", True) and ("LIVE" in info.get("live_status", "").upper() or info.get("duration") == "0")
+        return is_live, info.get("streamer", streamer_name), info.get("title", "")
+    except Exception:
+        pass
+
+    return False, streamer_name, ""
+
+
 async def _kick_vod_get_hls_url(url: str) -> tuple[str, str, str, int]:
     """
     Fetch the HLS playlist URL for a Kick VOD via Kick API v2.
