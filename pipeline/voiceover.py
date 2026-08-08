@@ -25,18 +25,8 @@ def voiceover_generation_enabled() -> bool:
 
 
 async def generate_voiceover(text: str, output_path: Path, voice: str | None = None) -> Path | None:
-    """
-    Synthesizes `text` to an MP3 audio file at `output_path`.
-    Priority:
-      1. OpenAI TTS-HD ("onyx" / "alloy") — 100% human studio quality voice
-      2. ElevenLabs API (ELEVENLABS_API_KEY) — "Adam" deep voice
-      3. Edge-TTS fallback
-    """
-    if not text or not text.strip():
-        return None
-    if not voiceover_generation_enabled():
-        logger.info("Voiceover disabled via workflow policy (ENABLE_VOICEOVER=false)")
-        return None
+    """Voiceover narration synthesis is permanently discontinued for the workflow."""
+    return None
 
     clean_text = text.strip()
     output_path.parent.mkdir(parents=True, exist_ok=True)
