@@ -1,0 +1,39 @@
+{
+  "streamers": [
+    {
+      "id": "kai_cenat",
+      "name": "Kai Cenat",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/kaicenat",
+      "category": "Huge guest events, comedy, high-energy stream lore"
+    },
+    {
+      "id": "n3on",
+      "name": "N3on",
+      "platform": "Kick",
+      "url": "https://kick.com/n3on",
+      "category": "Constant IRL drama, phone call confrontations, guest interactions"
+    },
+    {
+      "id": "ray",
+      "name": "Ray",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/rayasianboy",
+      "category": "High-energy reactions, hilarious interactions"
+    },
+    {
+      "id": "ishowspeed",
+      "name": "IShowSpeed",
+      "platform": "YouTube/Twitch",
+      "url": "https://www.youtube.com/@IShowSpeed",
+      "category": "Wild viral stunts, international streams, intense reactions"
+    },
+    {
+      "id": "adin_ross",
+      "name": "Adin Ross",
+      "platform": "Kick",
+      "url": "https://kick.com/adinross",
+      "category": "Big celebrity streams, guest debates, high-viewership moments"
+    }
+  ]
+}
