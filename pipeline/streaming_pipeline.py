@@ -470,23 +470,19 @@ async def _download_audio_window(
     output_path: Path,
 ) -> Path:
     """
-    Download a specific time window from an HLS stream using ffmpeg seek.
-
-    Uses ffmpeg -ss (input seek) to jump directly to start_sec in the DVR buffer,
-    then captures duration_sec seconds of audio. This correctly handles both
-    live DVR streams and VODs — no real-time pacing issue.
+    Download a specific time window from an HLS stream using fast output seek.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
         "ffmpeg", "-y",
         "-user_agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "-ss", str(start_sec),        # seek to start position in DVR
         "-i", hls_url,                # HLS playlist URL
-        "-t", str(duration_sec),      # capture this many seconds
+        "-ss", str(start_sec),        # seek position
+        "-t", str(duration_sec),      # capture duration
         "-vn",                        # audio only — no video track
         "-acodec", "aac",
-        "-b:a", "64k",                # low bitrate — only need intelligible speech
+        "-b:a", "64k",                # low bitrate — speech optimization
         "-f", "mp4",
         str(output_path),
     ]
@@ -518,27 +514,20 @@ async def _download_hd_clip_from_hls(
     stream_url: str = "",
 ) -> Path:
     """
-    Download a specific clip range at full quality from the HLS DVR using ffmpeg seek,
-    or via yt-dlp download_video_clip_range for YouTube / direct HTTP streams.
+    Download a specific clip range at high quality directly from the HLS stream.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     duration = end_sec - start_sec
 
-    is_youtube = stream_url and ("youtu" in stream_url.lower())
-    is_m3u8 = ".m3u8" in hls_url.lower()
-
-    if is_youtube or not is_m3u8:
-        if stream_url:
-            return await download_video_clip_range(stream_url, start_sec, end_sec, output_path)
-
     cmd = [
         "ffmpeg", "-y",
         "-user_agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "-ss", str(start_sec),
         "-i", hls_url,
+        "-ss", str(start_sec),
         "-t", str(duration),
-        "-c", "copy",                 # stream copy — fast, lossless
-        "-avoid_negative_ts", "make_zero",
+        "-c:v", "libx264",
+        "-c:a", "aac",
+        "-preset", "ultrafast",
         str(output_path),
     ]
 
