@@ -638,6 +638,7 @@ async def run_streaming_pipeline(
     target_total_clips: int = 3,
     campaign_brief: str = "",
     target_duration: str = "auto",
+    enable_subtitles: bool = True,
 ) -> None:
     """
     Global Top-N Selection Pipeline:
@@ -859,7 +860,7 @@ async def run_streaming_pipeline(
         await composite_clips(
             clips=[clip_out], captions=captions, watermark_path=watermark_path,
             moments=[moment], output_dir=finals_dir, layout_mode=layout_mode,
-            segments=segments, on_clip_ready=_on_clip_done,
+            segments=segments, enable_subtitles=enable_subtitles, on_clip_ready=_on_clip_done,
         )
 
     render_tasks = [

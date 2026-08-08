@@ -195,6 +195,7 @@ async def run_pipeline(
                 target_total_clips=target_total,
                 campaign_brief=campaign_brief,
                 target_duration=target_duration,
+                enable_subtitles=enable_subtitles,
             )
             return
 
@@ -258,6 +259,7 @@ async def run_pipeline(
                 target_total_clips=target_total,
                 campaign_brief=campaign_brief,
                 target_duration=target_duration,
+                enable_subtitles=enable_subtitles,
             )
             return
 
