@@ -197,7 +197,10 @@ async def score_moments(
         "30_60": "Each moment MUST be between 30 and 60 seconds (end - start MUST be >= 30 and <= 60).",
         "60_120": "Each moment MUST be between 60 and 120 seconds (1 to 2 minutes) (end - start MUST be >= 60 and <= 120).",
     }
-    dur_text = dur_rules.get(target_duration, "Each moment MUST be between 25 and 60 seconds (end - start MUST be >= 25 and <= 60).")
+    dur_text = dur_rules.get(
+        target_duration,
+        "Each moment's duration MUST be dynamically determined by the exact natural length of the Hook -> Event -> Payoff story arc (between 10 and 60 seconds). Let the complete sentence and natural conversation payoff determine the exact clip length so the moment never cuts off."
+    )
 
     system = _SYSTEM_PROMPT.format(
         top_n=top_n,
