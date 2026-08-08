@@ -231,7 +231,9 @@ async def _composite_one(
         vo_script = f"Wait until you see how this moment unfolded live!"
     try:
         from .voiceover import generate_voiceover
-        vo_file = await generate_voiceover(str(vo_script), vo_path)
+        voice_pool = ["onyx", "nova", "echo", "fable", "alloy", "shimmer"]
+        chosen_voice = voice_pool[moment.index % len(voice_pool)]
+        vo_file = await generate_voiceover(str(vo_script), vo_path, voice=chosen_voice)
         if vo_file and vo_file.exists() and vo_file.stat().st_size > 1000:
             res = subprocess.run(
                 ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(vo_file)],
