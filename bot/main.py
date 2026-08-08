@@ -93,6 +93,7 @@ def main() -> None:
         handle_schedule,
         handle_start,
         handle_stop,
+        handle_streamers,
         handle_update,
         handle_users,
     )
@@ -122,6 +123,7 @@ def main() -> None:
     app.add_handler(CommandHandler("users", handle_users))
     app.add_handler(CommandHandler("revoke", handle_revoke))
     app.add_handler(CommandHandler("schedule", handle_schedule))
+    app.add_handler(CommandHandler("streamers", handle_streamers))
 
     async def _post_init(application) -> None:
         import asyncio
@@ -132,6 +134,7 @@ def main() -> None:
             cmd_list = [
                 BotCommand("start", "🚀 Start bot & view status"),
                 BotCommand("help", "📖 View usage guide & features"),
+                BotCommand("streamers", "👑 Top 20 Viral Streamers Dashboard"),
                 BotCommand("schedule", "📅 View peak-hour schedule & quotas"),
                 BotCommand("brief", "🔴 Set custom AI campaign rules"),
                 BotCommand("status", "⚙️ Check live job progress"),

@@ -1500,6 +1500,42 @@ async def handle_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(summary, parse_mode="HTML")
 
 
+async def handle_streamers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Command /streamers — Displays the Top 20 Viral Streamer Roster Dashboard."""
+    if not update.effective_user or not _is_operator(update.effective_user.id):
+        await _handle_unapproved_user(update, context)
+        return
+
+    roster_path = Path("config/streamer_roster.json")
+    if not roster_path.exists():
+        await update.message.reply_text("⚠️ Streamer roster configuration file not found.")
+        return
+
+    try:
+        data = json.loads(roster_path.read_text())
+        streamers = data.get("streamers", [])
+    except Exception as exc:
+        await update.message.reply_text(f"⚠️ Error reading streamer roster: {exc}")
+        return
+
+    text_lines = [
+        "👑 <b>VIRAL Streamer Roster (Top 20 Creators in Your Niche)</b>\n\n"
+        "Tap any streamer's link below to copy and start clipping instantly:\n"
+    ]
+
+    for i, s in enumerate(streamers, start=1):
+        plat = "🟣" if s.get("platform") == "Twitch" else ("🟩" if s.get("platform") == "Kick" else "▶️")
+        text_lines.append(
+            f"{i:02d}. {plat} <b>{html.escape(s['name'])}</b> ({s.get('platform')})\n"
+            f"   • {html.escape(s.get('category', ''))}\n"
+            f"   • 🔗 <code>{s['url']}</code>"
+        )
+
+    full_msg = "\n\n".join(text_lines)
+    full_msg += "\n\n💡 <i>Copy and paste any link above into this chat to start clipping!</i>"
+    await update.message.reply_text(full_msg, parse_mode="HTML")
+
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id if update.effective_user else 0
