@@ -580,6 +580,35 @@ async def extract_metadata(url: str) -> dict[str, str]:
 
     platform, content_type, live_status = detect_platform_and_type(url)
     err_msg = str(last_exc).lower() if last_exc else ""
+
+    # Browser HTML metadata extraction fallback for YouTube videos
+    if is_youtube:
+        try:
+            from curl_cffi import requests as cffi_requests
+            r = cffi_requests.get(url, impersonate="chrome", allow_redirects=True, timeout=10)
+            if r.status_code == 200:
+                html_txt = r.text
+                m_title = re.search(r'<title>(.*?)</title>', html_txt)
+                b_title = m_title.group(1).replace(" - YouTube", "").strip() if m_title else ""
+                m_channel = re.search(r'"author":"(.*?)"', html_txt) or re.search(r'"ownerChannelName":"(.*?)"', html_txt)
+                b_streamer = clean_streamer_name(m_channel.group(1)) if m_channel else _parse_url_fallback(url)
+                m_dur = re.search(r'"lengthSeconds":"(\d+)"', html_txt)
+                b_dur = m_dur.group(1) if m_dur else "0"
+
+                logger.info("Metadata resolved via browser HTML fallback: streamer='%s', title='%s', dur=%ss", b_streamer, b_title, b_dur)
+                return {
+                    "streamer": b_streamer,
+                    "title": b_title,
+                    "duration": b_dur,
+                    "platform": platform,
+                    "content_type": content_type,
+                    "live_status": live_status,
+                    "is_offline": False,
+                    "effective_url": url,
+                }
+        except Exception as html_exc:
+            logger.warning("Browser HTML metadata fallback exception: %s", html_exc)
+
     # Never mark Kick VOD/clip URLs as offline — they use a dedicated downloader
     # that bypasses yt-dlp entirely, so yt-dlp errors are expected and irrelevant.
     u_lower_check = url.lower()
