@@ -530,17 +530,8 @@ async def download(url: str, output_dir: Path, streamer_info: dict | None = None
     # ── Kick Live Direct Downloader ──
     is_kick_live = "kick.com" in u_check and not ("/videos/" in u_check or "clips" in u_check)
     if is_kick_live:
-        raise PipelineError("download", "This stream is currently live! Please wait until the broadcast ends and send the recorded VOD link so the AI can properly analyze the full video for highlights.")
-
-    live_status = streamer_info.get("live_status", "")
-    is_live = "LIVE" in live_status or streamer_info.get("duration", "0") in ("0", "NA", "None")
-
-    # Override: URLs with /videos/ or /v/ in them are always VODs, never live
-    if "/videos/" in u_check or "/v/" in u_check or "clips" in u_check:
-        is_live = False
-        
-    if is_live:
-        raise PipelineError("download", "This stream is currently live! Please wait until the broadcast ends and send the recorded VOD link so the AI can properly analyze the full video for highlights.")
+        logger.info("Kick Live stream detected — using direct Kick API + ffmpeg HLS live downloader")
+        return await _kick_live_direct_download(url, video_path, audio_path)
 
     logger.info("Downloading %s (effective: %s, is_live: %s)", url, download_url, is_live)
 

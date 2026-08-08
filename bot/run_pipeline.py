@@ -192,6 +192,45 @@ async def run_pipeline(
                 stream_start_sec=start_sec,
                 stream_end_sec=end_sec,
                 chunk_minutes=streaming_chunk_min,
+                target_duration=target_duration,
+                enable_subtitles=enable_subtitles,
+            )
+            return
+
+        # ── 2. Live Stream Clipping Mode (Kick, Twitch & YouTube Live) ──────────────
+        u_lower = url.lower()
+        is_live_stream = ("LIVE" in str(live_status).upper() or duration_sec == 0.0 or streamer_info.get("is_live", False))
+        is_vod_or_clip = ("/videos/" in u_lower or "/v/" in u_lower or "clips" in u_lower)
+
+        if is_live_stream and not is_vod_or_clip:
+            card_msg = (
+                f"🎬 **Video Details Identified:**\n"
+                f"• **Platform:** {platform}\n"
+                f"• **Live Status:** 🔴 LIVE NOW\n"
+                f"• **Streamer:** {streamer_name}\n"
+                f"• **Title:** {video_title if video_title else 'N/A'}\n"
+                f"• **Duration:** Live Stream 🔴\n\n"
+                f"⚡ **Live Stream Clipping Active!**\n"
+                f"• Audio-scanning last 60 minutes of live stream...\n"
+                f"• Downloading ONLY the top viral video segments\n"
+                f"• First clip arriving in ~45 seconds ⚡"
+            )
+            await send_msg(card_msg)
+
+            notifier.stop()
+            if chat_id in active_run_status:
+                active_run_status[chat_id]["step"] = "Live stream: parallel audio scan..."
+
+            target_total = top_n_clips if top_n_clips > 0 else int(os.getenv("TOP_N_CLIPS", "10"))
+            await run_streaming_pipeline(
+                url=url,
+                bot=bot,
+                chat_id=chat_id,
+                run_dir=run_dir,
+                layout_mode=layout_mode,
+                stream_start_sec=None,
+                stream_end_sec=None,
+                chunk_minutes=streaming_chunk_min,
                 target_total_clips=target_total,
                 campaign_brief=campaign_brief,
                 target_duration=target_duration,
