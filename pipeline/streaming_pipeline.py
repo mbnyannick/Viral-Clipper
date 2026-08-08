@@ -313,8 +313,8 @@ async def _get_hls_url(url: str) -> str:
             *cookie_opts,
             *impersonate_opts,
             *yt_opts,
-            "-f", "worstvideo+bestaudio/worst/best",
-            "--get-url",
+            "-f", "b/best",
+            "-g",
             url,
         ]
 
