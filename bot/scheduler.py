@@ -314,14 +314,69 @@ class PlatformScheduler:
             self._yt_daily = {}
 
 
+_LIVE_NOTIFIED_CACHE: set[str] = set()
+
+
+async def run_live_streamer_monitor(bot=None) -> None:
+    """Check Top 20 Streamers roster for live status and send Telegram alerts."""
+    roster_path = Path("config/streamer_roster.json")
+    if not roster_path.exists():
+        return
+
+    op_id = os.environ.get("TELEGRAM_OPERATOR_CHAT_ID", "").strip()
+    if not op_id or op_id == "0":
+        return
+
+    try:
+        data = json.loads(roster_path.read_text())
+        streamers = data.get("streamers", [])
+    except Exception:
+        return
+
+    from pipeline.download import check_streamer_live_status
+
+    for s in streamers:
+        url = s.get("url", "")
+        sid = s.get("id", "")
+        if not url or not sid:
+            continue
+
+        try:
+            is_live, s_name, title = await check_streamer_live_status(url)
+            cache_key = f"{sid}_{datetime.now().strftime('%Y%m%d_%H')}"
+            if is_live and cache_key not in _LIVE_NOTIFIED_CACHE:
+                _LIVE_NOTIFIED_CACHE.add(cache_key)
+                plat = s.get("platform", "Stream")
+                plat_emoji = "🟣" if plat == "Twitch" else ("🟩" if plat == "Kick" else "▶️")
+
+                alert_text = (
+                    f"🔴 <b>LIVE STREAM ALERT: {s_name} is LIVE NOW on {plat}!</b>\n\n"
+                    f"• <b>Streamer:</b> {s_name}\n"
+                    f"• <b>Title:</b> {title if title else 'N/A'}\n"
+                    f"• <b>Platform:</b> {plat_emoji} {plat}\n\n"
+                    f"<i>Tap below to clip the live stream instantly!</i>"
+                )
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⚡ Clip Live Stream Now", callback_data=f"clip_streamer:{sid}")]
+                ])
+                if bot:
+                    await bot.send_message(chat_id=op_id, text=alert_text, reply_markup=keyboard, parse_mode="HTML")
+                logger.info("📡 Live stream alert sent to Telegram for %s (%s)", s_name, plat)
+        except Exception as exc:
+            logger.warning("Live monitor check error for %s: %s", sid, exc)
+
+
 scheduler = PlatformScheduler()
 
 
-async def run_scheduler_loop() -> None:
-    logger.info("🕐 Peak-hour scheduler started (ticks every 60s)")
+async def run_scheduler_loop(app=None) -> None:
+    logger.info("🕐 Peak-hour scheduler & Live Streamer Monitor started (ticks every 60s)")
+    bot_instance = getattr(app, "bot", None) if app else None
     while True:
         try:
             await scheduler.tick()
+            await run_live_streamer_monitor(bot_instance)
         except Exception as exc:
-            logger.exception("Scheduler tick error: %s", exc)
+            logger.exception("Scheduler / Live Monitor tick error: %s", exc)
         await asyncio.sleep(60)

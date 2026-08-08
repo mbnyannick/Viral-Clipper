@@ -128,7 +128,7 @@ def main() -> None:
     async def _post_init(application) -> None:
         import asyncio
         from telegram import BotCommand
-        asyncio.create_task(run_scheduler_loop())
+        asyncio.create_task(run_scheduler_loop(application))
         logger.info("Peak-hour scheduler background task started.")
         try:
             cmd_list = [
