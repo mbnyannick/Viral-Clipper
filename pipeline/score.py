@@ -110,33 +110,42 @@ AURA KEYWORD RULE (100% CONTEXTUALLY RELEVANT):
     - It MUST be ALL CAPS (e.g. PRANK, SPOTTED, KNOCKOUT, RECOGNIZED, BUSTED, ROASTED, EXPOSED, SHOCKED)
     - CRITICAL: Do NOT pick generic random words like "AURA" or "WHO". The word MUST be 100% derived from the actual clip action/topic (e.g., if it's a boxer prank, use `PRANK` or `BOXER`; if a fan recognizes the streamer, use `SPOTTED` or `CAUGHT`; if an insult occurs, use `ROASTED`).
 
-VIRAL STORY ARC & PAYOFF RULE (CRITICAL PSYCHOLOGY):
-14. Every clip MUST follow the 3-stage Viral Storytelling Arc ("Hook → Curiosity/Promise → Complete Payoff"):
-    - STAGE 1: HOOK (0–3s) — Immediate attention-grabbing statement or action.
-    - STAGE 2: CURIOSITY GAP & PROMISE (3–15s) — Builds suspense, tension, or expectation so the viewer MUST keep watching to see what happens.
-    - STAGE 3: COMPLETE PAYOFF & DELIVER (Final seconds) — The clip MUST include the full resolution, punchline, reaction, or outcome of the moment.
-    - NEVER cut off a clip right before the punchline or reaction finishes! The viewer MUST feel 100% satisfied by the end of the clip. Ensure `end` timestamp includes the entire final reaction or sentence.
+VIRAL CLIP SELECTION — MANDATORY HOOK → EVENT → PAYOFF EVALUATION:
+Evaluate every candidate moment strictly based on the HOOK → EVENT → PAYOFF storytelling structure.
+The selector's primary objective is: Find self-contained mini-stories that hook the viewer, build tension/curiosity, and deliver a 100% complete, emotionally or visually satisfying payoff.
+
+1. HOOK (0–3s): Identify where viewer curiosity/interest begins (unexpected statement, question, conflict, person approaching, visual surprise, or reaction). Start the clip shortly BEFORE the hook begins.
+2. EVENT (Development): Identify the situation unfolding after the hook. Remove dead time and meaningless chatter.
+3. PAYOFF (CRITICAL & MANDATORY): Identify the exact moment that rewards the viewer for watching (a punchline, shocking statement, funny response, confrontation, or sudden realization).
+   - PAYOFF WEIGHTING (CRITICAL): Give EXTRA WEIGHT to payoff strength in the "score" field.
+   - DO NOT select a moment simply because someone says something interesting. If the setup is good but the payoff is weak, LOWER THE VIRAL SCORE (score <= 60).
+   - NEVER CUT OFF A CLIP BEFORE THE PAYOFF FINISHES! The viewer MUST receive a complete, satisfying conclusion before the clip ends.
+4. START/END OPTIMIZATION:
+   - Start timestamp: 2–3 seconds BEFORE the hook begins to provide immediate context.
+   - End timestamp: 2–3 seconds AFTER the payoff/reaction completes so the clip feels like a complete mini-story and doesn't cut mid-sentence or mid-laughter.
+5. BEST CANDIDATE BEHAVIOR:
+   - Prefer (Strong Hook + Clear Event + Strong Payoff) over (Strong Hook + Long Conversation + Weak Payoff).
+   - Prefer (Short Setup + Immediate Payoff) over (Long Setup + Slightly Better Payoff).
+   - Ensure anyone who has NEVER seen this streamer before can watch the clip and immediately understand: "Oh, this is what is going on!"
 
 GEN Z HUMOR & VOICEOVER STYLE RULE (MANDATORY):
 15. GEN Z HUMOR & FUNNY NARRATION: For every clip's "voiceover" field, write a HILARIOUS, witty 1-sentence Gen Z commentary hook (12 to 18 words max).
     - Tone: Witty, funny, sarcastic, unhinged, or hyped Gen Z humor.
     - Gen Z Slang: Use natural Gen Z phrasing like "ain't no way", "bro was NOT ready", "cooked in 4k", "no shot", "he really thought", "lowkey wild", "out of line", "unhinged behavior".
     - Length: Exactly 1 punchy sentence (~3.0 to 4.5 seconds spoken duration). Never make it too long or verbose!
-    - Example voiceovers:
-      • "Ain't no way Kai thought he was getting away with this in 4K..."
-      • "Bro really thought he was smooth until the entire chat exposed him..."
-      • "Watch how Ray lost his mind the second she asked this question..."
-      • "No shot bro said this with a straight face live on stream..."
 
 Return ONLY a valid JSON array with exactly {top_n} objects. No markdown, no explanation, just raw JSON.
 
 Each object must have exactly these fields:
-  "start"         — float, seconds from start of video
-  "end"           — float, seconds from start of video
+  "start"         — float, seconds from start of video (shortly BEFORE hook)
+  "end"           — float, seconds from start of video (shortly AFTER payoff completes)
+  "is_viral_candidate" — boolean (true)
+  "viral_score"   — float, score from 0.0 to 10.0 heavily weighted by payoff strength
+  "payoff_description" — string, concise 1-sentence description of the exact payoff/resolution
   "caption_lines" — array of EXACTLY 3 strings. Line 1 = hook with 1 ALL CAPS word. Lines 2–3 = payoff with 1 more ALL CAPS word somewhere. Max 5 words/line. NO emoji in this field.
   "emoji"         — 2 to 3 relevant emoji characters together (e.g. "🔥💀", "😱🚨", "😂🤡💀")
   "score"         — integer, Viral potential score from 0 to 100
-  "reasoning"     — string, a punchy 1-sentence explanation of exactly WHY this moment is highly viral
+  "reasoning"     — string, a punchy 1-sentence explanation of why Hook -> Event -> Payoff is complete
   "title"         — string, SHORT curiosity-gap YouTube Shorts title (MAXIMUM 50 chars including emoji, e.g. "Kai Is COOKED 💀", "He Did WHAT?! 😱", "Bro SNAPPED 😤")
   "hashtags"      — string, 6 to 10 highly relevant, topic-specific viral hashtags separated by spaces (e.g. "#{streamer} #StreamerDrama #FunnyClips #KickHighlights #ViralShorts")
   "voiceover"     — string, Hilarious 1-sentence Gen Z commentary hook (12-18 words max, e.g. "Ain't no way bro thought he was getting away with this live in 4K...")
@@ -250,12 +259,12 @@ async def score_moments(
                 moments = [
                     Moment(
                         index=i,
-                        start=float(item["start"]),
-                        end=min(float(item["end"]) + 2.5, float(item["start"]) + 90.0),
+                        start=max(0.0, float(item["start"]) - 2.0),
+                        end=max(float(item["start"]) + 15.0, float(item["end"]) + 3.5),
                         caption_lines=list(item["caption_lines"]),
                         emoji=item.get("emoji", "🔥"),
-                        score=int(item.get("score", 90)),
-                        reasoning=item.get("reasoning", "High energy moment."),
+                        score=int(float(item.get("viral_score", item.get("score", 9.0))) * 10) if float(item.get("viral_score", 0.0)) > 0 else int(item.get("score", 90)),
+                        reasoning=item.get("reason", item.get("reasoning", "Strong Hook -> Event -> Payoff arc.")),
                         title=item.get("title", " ".join(item.get("caption_lines", []))),
                         hashtags=item.get("hashtags", f"#{display_streamer.replace(' ', '')} #StreamerHighlights #KickClips #TikTokViral #ReelsTrends #Shorts"),
                         voiceover=item.get("voiceover", ""),
