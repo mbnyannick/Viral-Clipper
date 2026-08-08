@@ -34,38 +34,7 @@ async def generate_voiceover(text: str, output_path: Path, voice: str | None = N
     clean_text = text.strip()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 1. OpenAI TTS-HD Studio Human Voices (onyx, nova, echo, fable, alloy, shimmer)
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if api_key:
-        try:
-            import json
-            import urllib.request
-            chosen_voice = voice or DEFAULT_VOICE
-            if chosen_voice not in ("alloy", "echo", "fable", "onyx", "nova", "shimmer"):
-                chosen_voice = "onyx"
-            req_data = json.dumps({
-                "model": "tts-1-hd",
-                "input": clean_text,
-                "voice": chosen_voice,
-                "speed": 1.15,
-            }).encode("utf-8")
-            req = urllib.request.Request(
-                "https://api.openai.com/v1/audio/speech",
-                data=req_data,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                method="POST"
-            )
-            def _fetch_openai():
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    output_path.write_bytes(resp.read())
-            await asyncio.to_thread(_fetch_openai)
-            if output_path.exists() and output_path.stat().st_size > 1000:
-                logger.info("OpenAI TTS-HD studio human voiceover generated (%s): %s", chosen_voice, output_path.name)
-                return output_path
-        except Exception as exc:
-            logger.warning("OpenAI TTS-HD failed: %s", exc)
-
-    # 2. Fish Audio TTS (s2.1-pro)
+    # 1. Fish Audio TTS (s2.1-pro — Primary Consistent Voice Actor)
     fish_key = os.environ.get("FISH_AUDIO_API_KEY", "").strip()
     if fish_key:
         try:
@@ -100,6 +69,35 @@ async def generate_voiceover(text: str, output_path: Path, voice: str | None = N
                 return output_path
         except Exception as exc:
             logger.warning("Fish Audio TTS failed: %s", exc)
+
+    # 2. OpenAI TTS-HD Studio Human Voice ("onyx" studio male narrator)
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if api_key:
+        try:
+            import json
+            import urllib.request
+            chosen_voice = voice or DEFAULT_VOICE
+            req_data = json.dumps({
+                "model": "tts-1-hd",
+                "input": clean_text,
+                "voice": chosen_voice,
+                "speed": 1.15,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                "https://api.openai.com/v1/audio/speech",
+                data=req_data,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                method="POST"
+            )
+            def _fetch_openai():
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    output_path.write_bytes(resp.read())
+            await asyncio.to_thread(_fetch_openai)
+            if output_path.exists() and output_path.stat().st_size > 1000:
+                logger.info("OpenAI TTS-HD studio human voiceover generated (%s): %s", chosen_voice, output_path.name)
+                return output_path
+        except Exception as exc:
+            logger.warning("OpenAI TTS-HD failed: %s", exc)
 
 
 

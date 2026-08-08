@@ -228,12 +228,22 @@ async def _composite_one(
     vo_dur = 0.0
     vo_script = getattr(moment, "voiceover", None)
     if not vo_script or not str(vo_script).strip():
-        vo_script = f"Wait until you see how this moment unfolded live!"
+        from .score import clean_streamer_name
+        clean_s = clean_streamer_name(getattr(moment, "streamer", "Streamer"))
+        clean_t = getattr(moment, "title", "") or " ".join(getattr(moment, "caption_lines", []))
+        if not clean_t:
+            clean_t = "this moment"
+        templates = [
+            f"Ain't no way {clean_s} reacted like this when {clean_t.lower()} happened...",
+            f"Bro really thought {clean_s} was going to let this slide live on stream...",
+            f"Watch what happened the exact second {clean_s} saw this unfold...",
+            f"No shot {clean_s} actually said this live on stream with a straight face...",
+            f"Look at how the entire chat lost their mind when {clean_s} did this...",
+        ]
+        vo_script = templates[moment.index % len(templates)]
     try:
         from .voiceover import generate_voiceover
-        voice_pool = ["onyx", "nova", "echo", "fable", "alloy", "shimmer"]
-        chosen_voice = voice_pool[moment.index % len(voice_pool)]
-        vo_file = await generate_voiceover(str(vo_script), vo_path, voice=chosen_voice)
+        vo_file = await generate_voiceover(str(vo_script), vo_path)
         if vo_file and vo_file.exists() and vo_file.stat().st_size > 1000:
             res = subprocess.run(
                 ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(vo_file)],
