@@ -569,9 +569,9 @@ async def download(url: str, output_dir: Path, streamer_info: dict | None = None
     section_opts = []
     try:
         dur = float(streamer_info.get("duration", "0") or "0")
-        if dur > 18000.0 and not is_live:
-            logger.info("VOD duration is %.1fh (>5h) — capping download to first 5 hours (*00:00:00-05:00:00)", dur / 3600.0)
-            section_opts = ["--download-sections", "*00:00:00-05:00:00"]
+        if dur > 7200.0 and not is_live:
+            logger.info("VOD duration is %.1fh (>2h) — capping download section to first 2.5 hours (*00:00:00-02:30:00)", dur / 3600.0)
+            section_opts = ["--download-sections", "*00:00:00-02:30:00"]
     except Exception:
         pass
 
@@ -584,7 +584,7 @@ async def download(url: str, output_dir: Path, streamer_info: dict | None = None
                 cmd = [
                     "yt-dlp",
                     "--no-check-certificates",
-                    "-f", "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/best",
+                    "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best",
                     "--merge-output-format", "mp4",
                     "--no-playlist",
                     "--remote-components", "ejs:github",
