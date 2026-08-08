@@ -133,14 +133,25 @@ async def _send_clip(bot, chat_id, clip_path: Path, caption: str, reply_markup=N
 class _ProgressTracker:
     """
     Maintains a single Telegram message that is edited every 3 seconds with a
-    clean, user-friendly progress card. No technical details exposed.
+    clean, user-friendly progress card showing real-time per-clip granular status.
 
     Stages tracked:
       1. 📡 Scanning   — audio download (one per window)
       2. 🧠 Analyzing  — transcription + AI scoring
       3. ⬇️ Downloading — HD clip segments for found moments
-      4. 🏞️ Finishing  — compositing + rendering
+      4. 🏙️ Compositing — FFmpeg rendering + captions
+      5. 🚀 Delivering  — sending to Telegram
     """
+
+    # Per-clip state emojis
+    _CLIP_STATES = {
+        "pending":      ("⏳", "Pending"),
+        "downloading":  ("⬇️", "Downloading HD..."),
+        "compositing":  ("🎨", "Compositing..."),
+        "delivering":   ("🚀", "Sending to Telegram..."),
+        "done":         ("✅", "Done!"),
+        "failed":       ("❌", "Failed"),
+    }
 
     def __init__(
         self,
@@ -171,10 +182,20 @@ class _ProgressTracker:
         self.composited = 0
         self.delivered = 0
 
+        # Per-clip state tracking: {clip_index: state_key}
+        self._clip_states: dict[int, str] = {}
+        self._start_time: float = 0.0
+        self._spinner_frames = ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"]
+        self._spinner_idx = 0
+
         self._msg_id: int | None = None
         self._task: asyncio.Task | None = None
         self._last_edit: float = 0.0
         self._stopped = False
+
+    def set_clip_state(self, clip_idx: int, state: str) -> None:
+        """Update per-clip pipeline state. Called from _render_and_deliver_one."""
+        self._clip_states[clip_idx] = state
 
     # ───────────────────────────────────────────────────────────────────────────
     def _bar(self, count: int, total: int, width: int = 10) -> str:
@@ -182,44 +203,86 @@ class _ProgressTracker:
         filled = round(count / max(total, 1) * width)
         return "▓" * filled + "░" * (width - filled)
 
+    def _elapsed_str(self) -> str:
+        import time
+        elapsed = int(time.time() - self._start_time) if self._start_time else 0
+        mins, secs = divmod(elapsed, 60)
+        return f"{mins}m {secs:02d}s" if mins > 0 else f"{secs}s"
+
     def _render(self) -> str:
-        import html
-        s_name = html.escape(self.streamer)
-        t_name = html.escape(self.title[:40] + ("…" if len(self.title) > 40 else "")) if self.title else ""
+        import html as _html
+        import time
+        self._spinner_idx = (self._spinner_idx + 1) % len(self._spinner_frames)
+        spin = self._spinner_frames[self._spinner_idx]
 
-        plat_str = f"• <b>Platform:</b> {html.escape(self.platform)}\n" if self.platform else ""
-        stat_str = f"• <b>Live Status:</b> {html.escape(self.live_status)}\n" if self.live_status else ""
+        s_name = _html.escape(self.streamer)
+        t_name = (_html.escape(self.title[:45] + ("…" if len(self.title) > 45 else "")))\
+            if self.title and self.title not in ("N/A", "") else ""
+
+        plat_str = f"• <b>Platform:</b> {_html.escape(self.platform)}\n" if self.platform else ""
+        stat_str = f"• <b>Live Status:</b> {_html.escape(self.live_status)}\n" if self.live_status else ""
         title_str = f"• <b>Title:</b> {t_name}\n" if t_name else ""
-        dur_str = f"• <b>Duration:</b> {html.escape(self.dur_display)}\n" if self.dur_display else ""
+        dur_str = f"• <b>Duration:</b> {_html.escape(self.dur_display)}\n" if self.dur_display else ""
 
-        # Step calculation:
-        if self.delivered > 0:
-            step_text = f"🚀 5/5 — Delivering Clips ({self.delivered} sent)..."
+        elapsed = self._elapsed_str()
+
+        # ── Phase 1: Scanning & Analysis overview bar ───────────────────────────────────
+        scan_bar = self._bar(self.scanned, self.total)
+        ai_bar = self._bar(self.analyzed, self.total)
+
+        # ── Phase 2: Per-clip granular status ──────────────────────────────────────────
+        clip_lines = ""
+        if self._clip_states:
+            sorted_clips = sorted(self._clip_states.items())
+            for clip_idx, state in sorted_clips:
+                emoji, label = self._CLIP_STATES.get(state, ("⏳", state))
+                clip_lines += f"  {emoji} <b>Clip #{clip_idx + 1:02d}</b> — {label}\n"
+
+        # ── Current active phase label ────────────────────────────────────────────────
+        if self.delivered > 0 and self.delivered >= max(1, self.moments_found):
+            phase = f"🎉 <b>Done!</b> {self.delivered} clip{'s' if self.delivered != 1 else ''} delivered!"
+        elif self.delivered > 0:
+            phase = f"🚀 <b>Delivering</b> — {self.delivered}/{self.moments_found} clips sent {spin}"
         elif self.composited > 0:
-            step_text = f"🏞️ 4/5 — Compositing Video Clips ({self.composited} ready)..."
+            phase = f"🎨 <b>Compositing</b> — Rendering video clips... {spin}"
         elif self.moments_found > 0:
-            displayed_moments = min(self.moments_found, self.target_clips) if self.target_clips > 0 else self.moments_found
-            step_text = f"✂️ 3/5 — Extracting Top HD Segments ({displayed_moments} moments found)..."
+            disp = min(self.moments_found, self.target_clips) if self.target_clips > 0 else self.moments_found
+            phase = f"✂️ <b>Extracting</b> — {disp} top moments selected {spin}"
         elif self.analyzed > 0:
-            step_text = f"🧠 2/5 — AI Analyzing Virality & Story Arc..."
+            phase = f"🧠 <b>AI Analyzing</b> — Finding viral moments... {spin}"
         else:
-            step_text = f"📥 1/5 — Audio Scanning Stream..."
+            phase = f"📡 <b>Audio Scanning</b> — {self.scanned}/{self.total} windows {spin}"
 
         card = (
-            f"🎬 <b>Video Details Identified:</b>\n"
+            f"🎦 <b>Live Clipping in Progress</b>\n"
+            f"───────────────────\n"
             f"{plat_str}"
             f"{stat_str}"
             f"• <b>Streamer:</b> {s_name}\n"
             f"{title_str}"
-            f"{dur_str}\n"
-            f"⚙️ <b>Live Progress:</b> {step_text}\n\n"
-            f"☕ Feel free to step away while I process your clips!"
+            f"{dur_str}"
+            f"• <b>Elapsed:</b> ⏱️ {elapsed}\n"
+            f"───────────────────\n"
+            f"📡 <b>Scanning:</b> <code>{scan_bar}</code> {self.scanned}/{self.total}\n"
+            f"🧠 <b>AI Scoring:</b> <code>{ai_bar}</code> {self.analyzed}/{self.total}\n"
+        )
+        if clip_lines:
+            card += (
+                f"───────────────────\n"
+                f"<b>🎥 Clip Status:</b>\n"
+                f"{clip_lines}"
+            )
+        card += (
+            f"───────────────────\n"
+            f"⚡️ {phase}"
         )
         return card
 
     # ───────────────────────────────────────────────────────────────────────────
     async def start(self) -> None:
         """Send the initial progress message and start the edit loop."""
+        import time
+        self._start_time = time.time()
         try:
             msg = await self.bot.send_message(
                 chat_id=self.chat_id,
@@ -232,25 +295,12 @@ class _ProgressTracker:
         self._task = asyncio.create_task(self._loop())
 
     async def _loop(self) -> None:
-        """Edit progress card and send 1-minute heartbeat status messages."""
-        heartbeat_counter = 0
+        """Edit progress card every 3 seconds for smooth real-time updates."""
         while not self._stopped:
-            await asyncio.sleep(5)
+            await asyncio.sleep(3)
             if self._stopped:
                 break
             await self._edit()
-            heartbeat_counter += 5
-            if heartbeat_counter >= 60:
-                heartbeat_counter = 0
-                if not self._stopped:
-                    msg_text = (
-                        f"⏱️ <b>1-Minute Progress Update:</b>\n"
-                        f"• 📡 Audio Scanned: {self.scanned}/{self.total} windows\n"
-                        f"• 🧠 AI Analyzed: {self.analyzed}/{self.total} windows\n"
-                        f"• 🎯 Moments Found: {self.moments_found}\n"
-                        f"• 🚀 Clips Delivered: {self.delivered}"
-                    )
-                    await _send_safe(self.bot, self.chat_id, msg_text, parse_mode="HTML")
 
     async def _edit(self) -> None:
         if self._msg_id is None:
@@ -776,21 +826,25 @@ async def run_streaming_pipeline(
 
         async with hd_sem:
             try:
+                tracker.set_clip_state(moment.index, "downloading")
                 await _download_hd_clip_from_hls(
                     hls_url=hls_url, start_sec=dl_start, end_sec=dl_end, output_path=clip_out, stream_url=url,
                 )
             except Exception as exc:
                 logger.warning("HD clip download failed idx %d: %s", moment.index, exc)
+                tracker.set_clip_state(moment.index, "failed")
                 return
 
         captions_dir = wdir / "captions"
         finals_dir = wdir / "finals"
 
+        tracker.set_clip_state(moment.index, "compositing")
         captions = await asyncio.get_event_loop().run_in_executor(
             None, render_captions, [moment], _ASSETS_DIR, captions_dir, layout_mode,
         )
 
         async def _on_clip_done(final_path: Path, m: Moment) -> None:
+            tracker.set_clip_state(m.index, "delivering")
             clip_num = m.index + 1
             mins = int(m.start // 60)
             secs = int(m.start % 60)
@@ -857,6 +911,7 @@ async def run_streaming_pipeline(
             delivered_count[0] += 1
             tracker.delivered += 1
             tracker.composited += 1
+            tracker.set_clip_state(m.index, "done")
 
         await composite_clips(
             clips=[clip_out], captions=captions, watermark_path=watermark_path,
