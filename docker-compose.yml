@@ -18,9 +18,10 @@ services:
       - /home/opc/.mozilla/firefox:/root/.mozilla/firefox:ro
       # Approved users database
       - ./approved_users.json:/app/approved_users.json
-      # Code mounts for instant live updates
+      # Code & config mounts for instant live updates
       - ./pipeline:/app/pipeline
       - ./bot:/app/bot
+      - ./config:/app/config
     deploy:
       resources:
         limits:
