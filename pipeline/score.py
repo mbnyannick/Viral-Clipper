@@ -117,6 +117,17 @@ VIRAL STORY ARC & PAYOFF RULE (CRITICAL PSYCHOLOGY):
     - STAGE 3: COMPLETE PAYOFF & DELIVER (Final seconds) — The clip MUST include the full resolution, punchline, reaction, or outcome of the moment.
     - NEVER cut off a clip right before the punchline or reaction finishes! The viewer MUST feel 100% satisfied by the end of the clip. Ensure `end` timestamp includes the entire final reaction or sentence.
 
+GEN Z HUMOR & VOICEOVER STYLE RULE (MANDATORY):
+15. GEN Z HUMOR & FUNNY NARRATION: For every clip's "voiceover" field, write a HILARIOUS, witty 1-sentence Gen Z commentary hook (12 to 18 words max).
+    - Tone: Witty, funny, sarcastic, unhinged, or hyped Gen Z humor.
+    - Gen Z Slang: Use natural Gen Z phrasing like "ain't no way", "bro was NOT ready", "cooked in 4k", "no shot", "he really thought", "lowkey wild", "out of line", "unhinged behavior".
+    - Length: Exactly 1 punchy sentence (~3.0 to 4.5 seconds spoken duration). Never make it too long or verbose!
+    - Example voiceovers:
+      • "Ain't no way Kai thought he was getting away with this in 4K..."
+      • "Bro really thought he was smooth until the entire chat exposed him..."
+      • "Watch how Ray lost his mind the second she asked this question..."
+      • "No shot bro said this with a straight face live on stream..."
+
 Return ONLY a valid JSON array with exactly {top_n} objects. No markdown, no explanation, just raw JSON.
 
 Each object must have exactly these fields:
@@ -128,7 +139,7 @@ Each object must have exactly these fields:
   "reasoning"     — string, a punchy 1-sentence explanation of exactly WHY this moment is highly viral
   "title"         — string, SHORT curiosity-gap YouTube Shorts title (MAXIMUM 50 chars including emoji, e.g. "Kai Is COOKED 💀", "He Did WHAT?! 😱", "Bro SNAPPED 😤")
   "hashtags"      — string, 6 to 10 highly relevant, topic-specific viral hashtags separated by spaces (e.g. "#{streamer} #StreamerDrama #FunnyClips #KickHighlights #ViralShorts")
-  "voiceover"     — string, A punchy 1-sentence hook narration for commentary (e.g. "Wait until you see how Kai reacted when this happened live...")
+  "voiceover"     — string, Hilarious 1-sentence Gen Z commentary hook (12-18 words max, e.g. "Ain't no way bro thought he was getting away with this live in 4K...")
   "aura_word"     — string, ONE single ALL CAPS word capturing this clip's energy (e.g. "COOKED", "AURA", "IMPRESSED", "CAUGHT", "DEAD", "WILD", "REAL", "WHO", "NOPE")
 """
 
