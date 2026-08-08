@@ -344,6 +344,11 @@ async def _get_hls_url(url: str) -> str:
     """
     u_lower = url.lower()
 
+    # For YouTube channel handle URLs, append /live so yt-dlp targets the live stream directly
+    if ("youtube.com/@" in u_lower or "youtube.com/c/" in u_lower) and "/live" not in u_lower and "/watch" not in u_lower and "/videos" not in u_lower:
+        url = url.rstrip("/") + "/live"
+        u_lower = url.lower()
+
     # ── Kick VOD fast path — bypass yt-dlp entirely ──────────────────────────
     if "kick.com" in u_lower and "/videos/" in u_lower:
         hls_url, _, _, _ = await _kick_vod_get_hls_url(url)
