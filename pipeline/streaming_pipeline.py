@@ -572,7 +572,7 @@ async def _download_audio_window(
     output_path: Path,
 ) -> Path:
     """
-    Download a specific time window from an HLS stream using fast output seek.
+    Download a specific time window from an HLS stream using fast input seek.
     (Fallback path used when full-audio pre-download is unavailable.)
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -580,8 +580,8 @@ async def _download_audio_window(
     cmd = [
         "ffmpeg", "-y",
         "-user_agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "-ss", str(start_sec),        # input seek — only fetches the needed HLS segments
         "-i", hls_url,                # HLS playlist URL
-        "-ss", str(start_sec),        # seek position
         "-t", str(duration_sec),      # capture duration
         "-vn",                        # audio only — no video track
         "-acodec", "aac",
@@ -866,19 +866,31 @@ async def run_streaming_pipeline(
     )
     await tracker.start()
 
-    # ── Phase 0: Download full scan-range audio ONCE (huge speedup vs per-window HLS seek) ──
+    # ── Phase 0: Audio source strategy ────────────────────────────────────────────
+    # Short ranges & live DVR: pre-download the whole scan-range audio once, then
+    # slice windows locally. Long recorded VODs: fetch each window directly via fast
+    # input-seek (only the needed HLS segments are pulled) — avoids the multi-hour
+    # linear audio download that makes long VODs feel slow.
+    scan_span_sec = max(0.0, stream_end_sec - stream_start_sec)
+    use_full_audio = is_live_now or scan_span_sec <= 900.0
     full_audio = run_dir / "full_audio.m4a"
-    try:
-        await _download_full_audio(
-            hls_url=hls_url,
-            start_sec=stream_start_sec,
-            end_sec=stream_end_sec,
-            output_path=full_audio,
+    if use_full_audio:
+        try:
+            await _download_full_audio(
+                hls_url=hls_url,
+                start_sec=stream_start_sec,
+                end_sec=stream_end_sec,
+                output_path=full_audio,
+            )
+            logger.info("Full scan-range audio ready: %s (%.1f MB)", full_audio.name, full_audio.stat().st_size / 1e6)
+        except Exception as full_exc:
+            logger.warning("Full-audio pre-download failed (%s) — falling back to per-window HLS seeks.", full_exc)
+            full_audio = None
+    else:
+        logger.info(
+            "Per-window HLS seeks active (%d windows, span=%.0fs, live=%s) — skipping full-audio pre-download.",
+            total, scan_span_sec, is_live_now,
         )
-        logger.info("Full scan-range audio ready: %s (%.1f MB)", full_audio.name, full_audio.stat().st_size / 1e6)
-    except Exception as full_exc:
-        logger.warning("Full-audio pre-download failed (%s) — falling back to per-window HLS seeks.", full_exc)
-        full_audio = None
 
     # ── Phase 1: Parallel Audio Scan & AI Moment Extraction ────────────────────
     scan_tasks = [

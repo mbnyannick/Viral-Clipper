@@ -296,7 +296,7 @@ async def run_pipeline(
                 run_dir=run_dir,
                 layout_mode=layout_mode,
                 stream_start_sec=0.0,
-                stream_end_sec=vod_dur_sec,
+                stream_end_sec=scan_dur_sec,
                 chunk_minutes=streaming_chunk_min,
                 target_total_clips=target_total,
                 campaign_brief=campaign_brief,
