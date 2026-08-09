@@ -5,8 +5,8 @@ Downloads the source video once using yt-dlp, extracts the audio track via
 ffmpeg, and retrieves rich platform, streamer, video title, duration, and live status metadata.
 
 Platform-Specific Engines:
-- Kick: --impersonate chrome for Cloudflare TLS bypass + /videos/UUID live fallback.
-- YouTube: player_client=android,mweb with nodejs JS runtime & optional cookies.txt support.
+- Kick: curl_cffi Chrome TLS impersonation for Cloudflare bypass + /videos/UUID live fallback.
+- YouTube: player_client retry chains with deno JS challenge solver (ejs:github) & cookies.txt support.
 - Twitch: native HLS extractor with 8 parallel fragment threads.
 
 Returns (video_path, audio_path, streamer_info).
@@ -451,7 +451,15 @@ YT_CLIENT_CHAINS = [
     [],  # Default web client (required for cookies.txt authentication)
     ["--extractor-args", "youtube:player_client=web"],
     ["--extractor-args", "youtube:player_client=tvhtml5,web"],
+    ["--extractor-args", "youtube:player_client=tv"],
+    ["--extractor-args", "youtube:player_client=android"],
+    ["--extractor-args", "youtube:player_client=mweb"],
 ]
+
+# YouTube intermittently issues "Sign in to confirm you're not a bot" challenges
+# against datacenter IPs. Pacing retries (instead of firing them back-to-back)
+# gives the JS challenge solver time to produce a valid token.
+YT_RETRY_SLEEP_SEC = 2.0
 
 
 async def extract_metadata(url: str) -> dict[str, str]:
@@ -517,12 +525,15 @@ async def extract_metadata(url: str) -> dict[str, str]:
 
     yt_client_chains = YT_CLIENT_CHAINS if is_youtube else [[]]
 
-    impersonate_opts = ["--impersonate", "chrome"] if is_kick else []
     cookie_opts = _get_cookie_opts()
 
     last_exc = None
+    attempt = 0
     for candidate_url in urls_to_try:
         for yt_opts in yt_client_chains:
+            if attempt > 0:
+                await asyncio.sleep(YT_RETRY_SLEEP_SEC)
+            attempt += 1
             try:
                 raw = await _run(
                     [
@@ -531,7 +542,6 @@ async def extract_metadata(url: str) -> dict[str, str]:
                         "--no-playlist",
                         "--remote-components", "ejs:github",
                         *cookie_opts,
-                        *impersonate_opts,
                         *yt_opts,
                         "--print", "%(uploader)s|%(channel)s|%(title)s|%(duration)s|%(is_live)s",
                         candidate_url,
@@ -680,7 +690,6 @@ async def download(url: str, output_dir: Path, streamer_info: dict | None = None
 
     yt_client_chains = YT_CLIENT_CHAINS if is_youtube else [[]]
 
-    impersonate_opts = ["--impersonate", "chrome"] if is_kick else []
     cookie_opts = _get_cookie_opts()
     # For active ongoing live streams (Kick and Twitch), cap download duration to 1 hour (3600s)
     live_downloader_opts = ["--downloader", "ffmpeg", "--downloader-args", "ffmpeg:-t 3600"] if (is_live and (is_kick or is_twitch)) else []
@@ -701,7 +710,7 @@ async def download(url: str, output_dir: Path, streamer_info: dict | None = None
     for target_url in urls_to_download:
         for yt_opts in yt_client_chains:
             for cmd_opts in [
-                [*cookie_opts, *impersonate_opts, *yt_opts, *speed_opts, *live_downloader_opts, *section_opts],
+                [*cookie_opts, *yt_opts, *speed_opts, *live_downloader_opts, *section_opts],
                 [*cookie_opts, *speed_opts, *live_downloader_opts, *section_opts],
             ]:
                 cmd = [
@@ -771,7 +780,6 @@ async def download_audio_chunk(
     u_lower = url.lower()
     is_youtube = "youtu" in u_lower
     is_kick = "kick.com" in u_lower
-    impersonate_opts = ["--impersonate", "chrome"] if is_kick else []
     cookie_opts = _get_cookie_opts()
     yt_client_chains = YT_CLIENT_CHAINS if is_youtube else [[]]
 
@@ -794,7 +802,6 @@ async def download_audio_chunk(
             "--no-playlist",
             "--remote-components", "ejs:github",
             *cookie_opts,
-            *impersonate_opts,
             *yt_opts,
             "-N", "4",
             "--concurrent-fragments", "4",
@@ -847,7 +854,6 @@ async def download_video_clip_range(
     u_lower = url.lower()
     is_youtube = "youtu" in u_lower
     is_kick = "kick.com" in u_lower
-    impersonate_opts = ["--impersonate", "chrome"] if is_kick else []
     cookie_opts = _get_cookie_opts()
     yt_client_chains = YT_CLIENT_CHAINS if is_youtube else [[]]
 
@@ -869,7 +875,6 @@ async def download_video_clip_range(
             "--no-playlist",
             "--remote-components", "ejs:github",
             *cookie_opts,
-            *impersonate_opts,
             *yt_opts,
             "-N", "8",
             "--concurrent-fragments", "8",

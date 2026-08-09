@@ -8,6 +8,8 @@ services:
     volumes:
       # Persist runtime scratch across restarts (optional — cleaned up per-run anyway)
       - ./tmp:/app/tmp
+      # Persist yt-dlp's challenge-solver / po-token cache across restarts & rebuilds
+      - ./tmp/yt-dlp-cache:/root/.cache/yt-dlp
       # Persist logs
       - ./logs:/app/logs
       # Assets are read-only inside the container
