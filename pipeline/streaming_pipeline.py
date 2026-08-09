@@ -26,6 +26,7 @@ import html
 import logging
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -118,8 +119,26 @@ async def _check_audio_volume(audio_path: Path) -> float:
 
 
 async def _send_clip(bot, chat_id, clip_path: Path, caption: str, reply_markup=None) -> None:
+    target = clip_path
+    if clip_path.exists() and clip_path.stat().st_size > 49 * 1024 * 1024:
+        logger.warning("Clip %s (%.1f MB) exceeds 50MB Telegram limit. Auto-compressing...",
+                       clip_path.name, clip_path.stat().st_size / (1024 * 1024))
+        compressed = clip_path.parent / f"{clip_path.stem}_comp.mp4"
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y", "-i", str(clip_path),
+                "-c:v", "libx264", "-crf", "28", "-preset", "fast",
+                "-c:a", "aac", "-b:a", "128k", str(compressed),
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=120.0)
+            if compressed.exists() and compressed.stat().st_size > 0 and compressed.stat().st_size < clip_path.stat().st_size:
+                target = compressed
+        except Exception as comp_exc:
+            logger.warning("Auto-compression failed: %s", comp_exc)
+
     try:
-        with open(clip_path, "rb") as fh:
+        with open(target, "rb") as fh:
             kwargs = {
                 "chat_id": chat_id, "video": fh, "caption": caption,
                 "parse_mode": "HTML", "supports_streaming": True,
@@ -127,9 +146,9 @@ async def _send_clip(bot, chat_id, clip_path: Path, caption: str, reply_markup=N
             if reply_markup:
                 kwargs["reply_markup"] = reply_markup
             await bot.send_video(**kwargs)
-        logger.info("  Delivered: %s", clip_path.name)
+        logger.info("  Delivered: %s", target.name)
     except Exception as exc:
-        logger.warning("Failed to deliver %s: %s", clip_path.name, exc)
+        logger.warning("Failed to deliver %s: %s", target.name, exc)
 
 
 class _ProgressTracker:
@@ -481,8 +500,8 @@ async def _download_full_audio(
     cmd = [
         "ffmpeg", "-y",
         "-user_agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "-ss", str(start_sec),        # input seek — skips DVR segments instead of re-downloading from start
         "-i", hls_url,                # HLS playlist URL
-        "-ss", str(start_sec),        # seek position
         "-t", str(duration_sec),      # capture duration
         "-vn",                        # audio only — no video track
         "-acodec", "aac",
@@ -606,12 +625,15 @@ async def _download_hd_clip_from_hls(
     cmd = [
         "ffmpeg", "-y",
         "-user_agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "-ss", str(start_sec),        # input seek — skips DVR segments instead of re-downloading from start
         "-i", hls_url,
-        "-ss", str(start_sec),
         "-t", str(duration),
         "-c:v", "libx264",
         "-c:a", "aac",
-        "-preset", "ultrafast",
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-maxrate", "8000k",
+        "-bufsize", "16000k",
         str(output_path),
     ]
 
@@ -1034,7 +1056,6 @@ async def run_streaming_pipeline(
         return
 
     # ── Build pending schedule session for "Schedule All" confirmation ──────
-    import shutil
     try:
         from bot.handlers import _pending_schedule_sessions
         clips_public_dir = Path("tmp/clips")

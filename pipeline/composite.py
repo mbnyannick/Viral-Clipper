@@ -523,9 +523,9 @@ def _get_v_encoder_args() -> list[str]:
     return [
         "-c:v", "libx264",
         "-preset", "superfast",
-        "-crf", "21",
-        "-maxrate", "12000k",
-        "-bufsize", "24000k",
+        "-crf", "23",
+        "-maxrate", "6000k",
+        "-bufsize", "12000k",
         "-threads", "2",
     ]
 
