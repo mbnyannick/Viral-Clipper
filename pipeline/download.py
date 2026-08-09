@@ -385,9 +385,13 @@ async def _kick_live_direct_download(
 
 def _get_cookie_opts() -> list[str]:
     """
-    Return yt-dlp cookie flags. Checks for Firefox profile in container/host,
-    or falls back to cookies.txt if present.
+    Return yt-dlp cookie flags. Prefers cookies.txt (works without libnss3 in
+    the container), and only falls back to a Firefox profile if available.
     """
+    for cookie_path in [Path("cookies.txt"), Path("assets/cookies.txt"), Path("/app/cookies.txt")]:
+        if cookie_path.exists():
+            return ["--cookies", str(cookie_path)]
+
     firefox_paths = [
         Path("/root/.mozilla/firefox"),
         Path("/home/opc/.mozilla/firefox"),
@@ -399,10 +403,6 @@ def _get_cookie_opts() -> list[str]:
             if profiles:
                 return ["--cookies-from-browser", f"firefox:{profiles[0]}"]
             return ["--cookies-from-browser", f"firefox:{ff_path}"]
-
-    for cookie_path in [Path("cookies.txt"), Path("assets/cookies.txt"), Path("/app/cookies.txt")]:
-        if cookie_path.exists():
-            return ["--cookies", str(cookie_path)]
     return []
 
 
