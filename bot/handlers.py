@@ -18,6 +18,7 @@ from telegram.ext import ContextTypes
 
 from bot.run_pipeline import run_pipeline
 from bot.scheduler import next_peak_slot, scheduler
+from pipeline import get_public_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -746,7 +747,7 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
     msg = query.message if query else None
     logger.info("⚡ [POST BUTTON TAPPED] platform=%s, clip_num=%s, chat_id=%s", platform, clip_num, chat_id)
 
-    webhook_url = os.environ.get("MAKE_WEBHOOK_URL", "https://150-136-108-208.sslip.io/webhook/viral-post").strip()
+    webhook_url = os.environ.get("MAKE_WEBHOOK_URL", f"{get_public_base_url()}/webhook/viral-post").strip()
     if not webhook_url:
         if query:
             await query.answer("⚠️ No Webhook URL set.", show_alert=True)
@@ -787,7 +788,7 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
                 tg_file = await asyncio.wait_for(context.bot.get_file(msg.video.file_id), timeout=10.0)
                 await asyncio.wait_for(tg_file.download_to_drive(public_path), timeout=25.0)
             if public_path.exists() and public_path.stat().st_size > 1000:
-                video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
+                video_url = f"{get_public_base_url()}/clips/{public_filename}"
                 logger.info("  Direct Telegram file resolved: %s", video_url)
         except Exception as f_exc:
             logger.warning("Could not download Telegram video file: %s", f_exc)
@@ -822,7 +823,7 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
             "caption": clean_caption,
             "description": clean_caption,
             "video_url": video_url,
-            "thumbnail_url": f"https://150-136-108-208.sslip.io/clips/thumbnail_{int(clip_num)-1:02d}.jpg",
+            "thumbnail_url": f"{get_public_base_url()}/clips/thumbnail_{int(clip_num)-1:02d}.jpg",
             "cover_timestamp_ms": 1800,
             "video_filename": f"clip_{int(clip_num):03d}.mp4",
             "mime_type": "video/mp4",
@@ -1048,7 +1049,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     tg_file = await asyncio.wait_for(context.bot.get_file(msg.video.file_id), timeout=6.0)
                     await asyncio.wait_for(tg_file.download_to_drive(public_path), timeout=12.0)
                 if public_path.exists() and public_path.stat().st_size > 1000:
-                    video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
+                    video_url = f"{get_public_base_url()}/clips/{public_filename}"
             except Exception as exc:
                 logger.warning("Scheduler: could not resolve video URL from Telegram msg: %s", exc)
 
@@ -1058,9 +1059,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 if f"clip_{c_num:03d}" in f.name or f"clip_{c_num:02d}" in f.name or f"clip_{c_num}." in f.name or f"_{c_num:02d}." in f.name or f"_{c_num:03d}." in f.name
             ]
             if matching_clips:
-                video_url = f"https://150-136-108-208.sslip.io/clips/{matching_clips[0].name}"
+                video_url = f"{get_public_base_url()}/clips/{matching_clips[0].name}"
             else:
-                video_url = f"https://150-136-108-208.sslip.io/clips/clip_{c_num:03d}.mp4"
+                video_url = f"{get_public_base_url()}/clips/clip_{c_num:03d}.mp4"
 
         platforms = ["tiktok", "instagram", "facebook", "youtube"] if sched_platform == "all" else [sched_platform]
 

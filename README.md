@@ -5,6 +5,10 @@ caption-branded 9:16 vertical clips — no manual editing, no third-party clippi
 
 **Pipeline:** download → chunk → transcribe → score → cut → render → composite → deliver → cleanup
 
+Two engines:
+- **Classic mode** (`bot/run_pipeline.py`) — full VOD: download → chunk → transcribe → score → cut → composite → deliver.
+- **Progressive mode** (`pipeline/streaming_pipeline.py`) — live streams & Kick/Twitch VODs: resolves the raw HLS URL, downloads the full scan-range audio **once**, then slices 10-minute windows locally in parallel, ranks moments globally, and delivers each clip as soon as it's ready.
+
 ---
 
 ## Requirements
@@ -12,7 +16,8 @@ caption-branded 9:16 vertical clips — no manual editing, no third-party clippi
 - Docker + Docker Compose (runs on Oracle Cloud Free Tier ARM / any Linux VM)
 - Telegram bot token (from [@BotFather](https://t.me/BotFather))
 - Your Telegram user ID (from [@userinfobot](https://t.me/userinfobot))
-- [Groq API key](https://console.groq.com) (Whisper Large v3 Turbo transcription)
+- [Groq API key](https://console.groq.com) (Whisper Large v3 Turbo transcription fallback)
+- [Deepgram API key](https://deepgram.com) (Nova-2 primary transcription)
 - [DeepSeek API key](https://platform.deepseek.com) (moment scoring)
 
 ---
@@ -110,8 +115,13 @@ All tuning options are in `.env`:
 | Variable | Default | Description |
 |---|---|---|
 | `TOP_N_CLIPS` | `10` | Number of highlight moments to extract |
-| `CHUNK_DURATION_MINUTES` | `15` | Audio chunk size for Groq (keep ≤ 15 min / 25 MB) |
+| `CHUNK_DURATION_MINUTES` | `15` | Audio chunk size for transcription |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | `deepseek-chat` (fast) or `deepseek-reasoner` (higher quality) |
+| `PUBLIC_BASE_URL` | `https://150-136-108-208.sslip.io` | Public base URL for hosted clips/thumbnails |
+| `MAKE_WEBHOOK_URL` | `{PUBLIC_BASE_URL}/webhook/viral-post` | Webhook for auto-posting clips |
+| `CLIP_WINDOW_MINUTES` | `60` | Progressive mode: scan window size for live streams |
+
+**YouTube cookies:** the container reads `cookies.txt` at the repo root (Netscape format, exported via yt-dlp). This authenticates YouTube requests and avoids the "Sign in to confirm you're not a bot" block. Re-export it periodically as cookies expire.
 
 ---
 
@@ -166,10 +176,10 @@ Font-dependent caption render tests auto-skip if `assets/fonts/Bold.ttf` is not 
 
 | Source | Cost |
 |---|---|
-| Groq Whisper (4-hour VOD) | ~$0.16 |
+| Deepgram Nova-2 transcription (4-hour VOD) | ~$0.50 |
 | DeepSeek moment scoring (one call) | ~$0.01–$0.05 |
 | Oracle Always Free ARM VM | $0 |
-| **Total per run** | **< $0.25** |
+| **Total per run** | **< $0.60** |
 
 ---
 
@@ -177,6 +187,8 @@ Font-dependent caption render tests auto-skip if `assets/fonts/Bold.ttf` is not 
 
 - **yt-dlp updates:** Run `docker compose build --no-cache` periodically to pull the latest
   yt-dlp, which may be needed if YouTube/Kick/Twitch update their anti-scraping measures.
+- **YouTube bot-checks:** If you see "Sign in to confirm you're not a bot" in the logs, re-export
+  `cookies.txt` from a logged-in browser and `docker compose restart viral`.
 - **Logs:** Available at `./logs/viral.log` (host-mounted volume, 10 MB rotating).
 - **Crash recovery:** The `restart: always` policy in `docker-compose.yml` ensures the bot
   auto-restarts without manual intervention.

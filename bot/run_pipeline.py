@@ -25,6 +25,7 @@ from pipeline.composite import composite_clips
 from pipeline.deliver import deliver_clips
 from pipeline.errors import PipelineError
 from pipeline.streaming_pipeline import run_streaming_pipeline
+from pipeline import get_public_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -499,7 +500,7 @@ async def run_pipeline(
                 try:
                     if not public_path.exists():
                         shutil.copy2(clip_path, public_path)
-                    video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
+                    video_url = f"{get_public_base_url()}/clips/{public_filename}"
                 except Exception:
                     video_url = ""
                 raw_title = getattr(m, "title", "") or getattr(m, "caption_lines", [""])[0]
@@ -510,7 +511,7 @@ async def run_pipeline(
                     "caption": raw_title,
                     "description": raw_title,
                     "video_url": video_url,
-                    "thumbnail_url": f"https://150-136-108-208.sslip.io/clips/thumbnail_{idx-1:02d}.jpg",
+                    "thumbnail_url": f"{get_public_base_url()}/clips/thumbnail_{idx-1:02d}.jpg",
                     "cover_timestamp_ms": 1800,
                     "video_filename": f"clip_{idx:03d}.mp4",
                     "mime_type": "video/mp4",

@@ -96,14 +96,6 @@ def _parse_url_fallback(url: str) -> str:
     return "Streamer"
 
 
-YT_CLIENT_CHAINS = [
-    ["--extractor-args", "youtube:player_client=ios,mweb"],
-    ["--extractor-args", "youtube:player_client=mweb,web"],
-    ["--extractor-args", "youtube:player_client=ios,android"],
-    [],
-]
-
-
 def normalize_kick_url(url: str) -> str:
     """Return original URL so Kick VODs and clips keep their exact endpoint."""
     return url

@@ -172,7 +172,7 @@ async def score_moments(
     segments: list[dict],
     api_key: str,
     top_n: int = 10,
-    model: str = "deepseek-v4-flash",
+    model: str = "deepseek-chat",
     streamer: str = "Streamer",
     video_title: str = "",
     campaign_brief: str = "",
@@ -199,11 +199,8 @@ async def score_moments(
         streamer=display_streamer,
         video_title=video_title,
     )
-    # Replace default duration line 12 with selected target duration
-    system = system.replace(
-        "12. CLIP DURATION: Each moment MUST be between 25 and 60 seconds (end - start MUST be >= 25 and <= 60).",
-        f"12. CLIP DURATION: {dur_text}"
-    )
+    # Append the selected clip-duration rule (prompt has no line 12 to replace)
+    system += f"\n\n12. CLIP DURATION: {dur_text}"
 
     if spike_windows:
         spike_text = "\n".join(
@@ -362,7 +359,7 @@ async def generate_master_caption(
     moments: list[Moment],
     segments: list[dict],
     api_key: str,
-    model: str = "deepseek-v4-flash",
+    model: str = "deepseek-chat",
     streamer: str = "Streamer",
     video_title: str = "",
     campaign_brief: str = "",

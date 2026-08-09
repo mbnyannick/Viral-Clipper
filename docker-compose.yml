@@ -14,8 +14,6 @@ services:
       - ./assets:/app/assets:ro
       # Cookies for yt-dlp YouTube authentication
       - ./cookies.txt:/app/cookies.txt
-      # Mount Firefox profile from host for automatic live browser cookie authentication
-      - /home/opc/.mozilla/firefox:/root/.mozilla/firefox:ro
       # Approved users database
       - ./approved_users.json:/app/approved_users.json
       # Code & config mounts for instant live updates

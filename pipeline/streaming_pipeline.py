@@ -43,6 +43,7 @@ from pipeline.download import (
 from pipeline.errors import PipelineError
 from pipeline.score import Moment, score_moments, _generate_fallback_moments, verify_and_clean_visual_moments
 from pipeline.text_utils import mask_profanity
+from pipeline import get_public_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,7 @@ async def _send_safe(bot, chat_id, text: str, parse_mode: str = "") -> None:
         kwargs = {"chat_id": chat_id, "text": text}
         if parse_mode:
             kwargs["parse_mode"] = parse_mode
+        await bot.send_message(**kwargs)
     except Exception as exc:
         logger.warning("Telegram send failed: %s", exc)
 
@@ -463,6 +465,87 @@ async def _get_stream_duration(hls_url: str, stream_url: str = "") -> float:
     return 3600.0
 
 
+async def _download_full_audio(
+    hls_url: str,
+    start_sec: float,
+    end_sec: float,
+    output_path: Path,
+) -> Path:
+    """
+    Download the full scan-range audio ONCE so windows can be sliced locally.
+    (The old approach re-ran ffmpeg output-seek per window, forcing HLS to
+    re-download every segment from the start of the DVR playlist each time.)
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    duration_sec = max(1.0, end_sec - start_sec)
+    cmd = [
+        "ffmpeg", "-y",
+        "-user_agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "-i", hls_url,                # HLS playlist URL
+        "-ss", str(start_sec),        # seek position
+        "-t", str(duration_sec),      # capture duration
+        "-vn",                        # audio only — no video track
+        "-acodec", "aac",
+        "-b:a", "64k",                # low bitrate — speech optimization
+        "-f", "mp4",
+        str(output_path),
+    ]
+    logger.info(
+        "Downloading full scan-range audio once (%.0fs–%.0fs, %.0fs)...",
+        start_sec, end_sec, duration_sec,
+    )
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise PipelineError(
+            "full_audio",
+            f"{output_path.name}: {stderr.decode(errors='replace')[-400:]}",
+        )
+    return output_path
+
+
+async def _slice_audio_window(
+    full_audio: Path,
+    start_sec: float,
+    duration_sec: float,
+    output_path: Path,
+) -> Path:
+    """Slice a window out of an already-downloaded local audio file (fast seek)."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(start_sec),        # input seek — instant on local file
+        "-i", str(full_audio),
+        "-t", str(duration_sec),
+        "-vn",
+        "-acodec", "aac",
+        "-b:a", "64k",
+        "-f", "mp4",
+        str(output_path),
+    ]
+    logger.info(
+        "Local slice: %.0fs–%.0fs → %s",
+        start_sec, start_sec + duration_sec, output_path.name,
+    )
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise PipelineError(
+            "audio_window",
+            f"{output_path.name}: {stderr.decode(errors='replace')[-400:]}",
+        )
+    return output_path
+
+
 async def _download_audio_window(
     hls_url: str,
     start_sec: float,
@@ -471,6 +554,7 @@ async def _download_audio_window(
 ) -> Path:
     """
     Download a specific time window from an HLS stream using fast output seek.
+    (Fallback path used when full-audio pre-download is unavailable.)
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -563,6 +647,7 @@ async def _scan_and_score_window(
     streamer: str,
     video_title: str,
     tracker: "_ProgressTracker",
+    full_audio: Path | None = None,
 ) -> dict:
     """
     Phase 1: Audio-scan window, transcribe with Deepgram, and score candidate moments.
@@ -580,12 +665,20 @@ async def _scan_and_score_window(
     audio_sem = _get_audio_sem()
     async with audio_sem:
         try:
-            await _download_audio_window(
-                hls_url=hls_url,
-                start_sec=window_start,
-                duration_sec=window_duration,
-                output_path=audio_path,
-            )
+            if full_audio is not None and full_audio.exists() and full_audio.stat().st_size >= 4096:
+                await _slice_audio_window(
+                    full_audio=full_audio,
+                    start_sec=window_start,
+                    duration_sec=window_duration,
+                    output_path=audio_path,
+                )
+            else:
+                await _download_audio_window(
+                    hls_url=hls_url,
+                    start_sec=window_start,
+                    duration_sec=window_duration,
+                    output_path=audio_path,
+                )
         except Exception as exc:
             logger.warning("%s — audio download failed (%s). Skipping.", label, exc)
             tracker.scanned += 1
@@ -751,6 +844,20 @@ async def run_streaming_pipeline(
     )
     await tracker.start()
 
+    # ── Phase 0: Download full scan-range audio ONCE (huge speedup vs per-window HLS seek) ──
+    full_audio = run_dir / "full_audio.m4a"
+    try:
+        await _download_full_audio(
+            hls_url=hls_url,
+            start_sec=stream_start_sec,
+            end_sec=stream_end_sec,
+            output_path=full_audio,
+        )
+        logger.info("Full scan-range audio ready: %s (%.1f MB)", full_audio.name, full_audio.stat().st_size / 1e6)
+    except Exception as full_exc:
+        logger.warning("Full-audio pre-download failed (%s) — falling back to per-window HLS seeks.", full_exc)
+        full_audio = None
+
     # ── Phase 1: Parallel Audio Scan & AI Moment Extraction ────────────────────
     scan_tasks = [
         _scan_and_score_window(
@@ -765,6 +872,7 @@ async def run_streaming_pipeline(
             streamer=streamer,
             video_title=video_title,
             tracker=tracker,
+            full_audio=full_audio,
         )
         for i, w_start in enumerate(windows)
     ]
@@ -945,7 +1053,7 @@ async def run_streaming_pipeline(
             try:
                 if not public_path.exists():
                     shutil.copy2(clip_path, public_path)
-                video_url = f"https://150-136-108-208.sslip.io/clips/{public_filename}"
+                video_url = f"{get_public_base_url()}/clips/{public_filename}"
             except Exception:
                 video_url = ""
 
@@ -957,7 +1065,7 @@ async def run_streaming_pipeline(
                 "caption": raw_title,
                 "description": raw_title,
                 "video_url": video_url,
-                "thumbnail_url": f"https://150-136-108-208.sslip.io/clips/thumbnail_{idx-1:02d}.jpg",
+                "thumbnail_url": f"{get_public_base_url()}/clips/thumbnail_{idx-1:02d}.jpg",
                 "cover_timestamp_ms": 1800,
                 "video_filename": f"clip_{idx:03d}.mp4",
                 "mime_type": "video/mp4",

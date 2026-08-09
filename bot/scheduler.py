@@ -21,6 +21,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from pipeline import get_public_base_url
+
 logger = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
@@ -253,7 +255,7 @@ class PlatformScheduler:
         payload = item["payload"]
         webhook_url = os.environ.get(
             "MAKE_WEBHOOK_URL",
-            "https://150-136-108-208.sslip.io/webhook/viral-post",
+            f"{get_public_base_url()}/webhook/viral-post",
         ).strip()
 
         logger.info("⏰ Scheduler firing: %s → %s", platform, payload.get("clip_id", "?"))
