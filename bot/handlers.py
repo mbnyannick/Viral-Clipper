@@ -960,7 +960,10 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
 
     if query:
         plat_label = "ALL Platforms" if platform == "all" else platform.upper()
-        await query.answer(f"✅ Dispatched to {plat_label}!", show_alert=False)
+        try:
+            await query.answer(f"✅ Dispatched to {plat_label}!", show_alert=False)
+        except Exception:
+            pass
 
     return
 

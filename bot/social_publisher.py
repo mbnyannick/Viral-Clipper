@@ -78,6 +78,39 @@ def publish_to_zernio(platform: str, title: str, content: str, video_url: str) -
         return False, str(exc)
 
 
+def _auto_cleanup_woopsocial_media(api_key: str, project_id: str, keep_latest: int = 5) -> None:
+    """
+    Automatically clean up older media library items in WoopSocial
+    to prevent the account from ever reaching its 1 GB storage limit.
+    """
+    ctx = _get_ssl_context()
+    try:
+        url = f"https://api.woopsocial.com/v1/media?projectId={project_id}"
+        req = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Bearer {api_key}", "User-Agent": "ViralBot/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=15.0, context=ctx) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            items = data.get("media", [])
+            if len(items) > keep_latest:
+                for item in items[keep_latest:]:
+                    mid = item.get("id")
+                    if mid:
+                        del_req = urllib.request.Request(
+                            f"https://api.woopsocial.com/v1/media/{mid}",
+                            headers={"Authorization": f"Bearer {api_key}", "User-Agent": "ViralBot/1.0"},
+                            method="DELETE",
+                        )
+                        try:
+                            with urllib.request.urlopen(del_req, timeout=10.0, context=ctx):
+                                logger.info("Auto-cleaned old WoopSocial media item %s", mid)
+                        except Exception as de:
+                            logger.debug("Failed deleting old media %s: %s", mid, de)
+    except Exception as exc:
+        logger.debug("WoopSocial media cleanup skipped: %s", exc)
+
+
 def publish_to_woopsocial(platform: str, title: str, content: str, video_url: str) -> tuple[bool, str]:
     """Publish to Instagram Reels or Facebook Reels via WoopSocial API."""
     is_ig = ("instagram" in platform.lower() or "ig" in platform.lower())
@@ -94,7 +127,7 @@ def publish_to_woopsocial(platform: str, title: str, content: str, video_url: st
         with urllib.request.urlopen(req_v, timeout=45.0, context=ctx) as v_resp:
             video_bytes = v_resp.read()
 
-        # 2. Upload media
+        # 2. Upload media (with auto-retry & auto-purge if storage limit is hit)
         boundary = "----ViralBoundary839218319"
         body_parts = [
             f"--{boundary}\r\n".encode("utf-8"),
@@ -105,20 +138,32 @@ def publish_to_woopsocial(platform: str, title: str, content: str, video_url: st
         ]
         form_data = b"".join(body_parts)
 
-        req_upload = urllib.request.Request(
-            f"https://api.woopsocial.com/v1/media?projectId={project_id}",
-            data=form_data,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-                "User-Agent": "ViralBot/1.0"
-            },
-            method="POST"
-        )
-        with urllib.request.urlopen(req_upload, timeout=90.0, context=ctx) as u_resp:
-            u_data = json.loads(u_resp.read().decode("utf-8", errors="replace"))
-            media_id = u_data.get("mediaId") or u_data.get("id")
+        def _do_upload() -> dict:
+            req_upload = urllib.request.Request(
+                f"https://api.woopsocial.com/v1/media?projectId={project_id}",
+                data=form_data,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": f"multipart/form-data; boundary={boundary}",
+                    "User-Agent": "ViralBot/1.0"
+                },
+                method="POST"
+            )
+            with urllib.request.urlopen(req_upload, timeout=90.0, context=ctx) as u_resp:
+                return json.loads(u_resp.read().decode("utf-8", errors="replace"))
 
+        try:
+            u_data = _do_upload()
+        except urllib.error.HTTPError as he:
+            err_body = he.read().decode("utf-8", errors="replace")
+            if "storage limit exceeded" in err_body.lower() or he.code == 422:
+                logger.warning("WoopSocial storage limit hit. Purging old media library items and retrying...")
+                _auto_cleanup_woopsocial_media(api_key, project_id, keep_latest=0)
+                u_data = _do_upload()
+            else:
+                raise he
+
+        media_id = u_data.get("mediaId") or u_data.get("id")
         if not media_id:
             return False, "Failed to retrieve mediaId from WoopSocial"
 
@@ -155,6 +200,8 @@ def publish_to_woopsocial(platform: str, title: str, content: str, video_url: st
         with urllib.request.urlopen(req_post, timeout=20.0, context=ctx) as p_resp:
             body = p_resp.read().decode("utf-8", errors="replace")
             logger.info("WoopSocial %s post success (code %d): %s", plat_str, p_resp.status, body[:200])
+            # Keep storage clean after successful post
+            _auto_cleanup_woopsocial_media(api_key, project_id, keep_latest=5)
             return True, body
     except urllib.error.HTTPError as he:
         err_body = he.read().decode("utf-8", errors="replace")
