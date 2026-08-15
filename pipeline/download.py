@@ -766,7 +766,7 @@ async def download(url: str, output_dir: Path, streamer_info: dict | None = None
                 cmd = [
                     "yt-dlp",
                     "--no-check-certificates",
-                    "-f", "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=1080][vcodec^=avc]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+                    "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best",
                     "--merge-output-format", "mp4",
                     "--no-playlist",
                     "--remote-components", "ejs:github",

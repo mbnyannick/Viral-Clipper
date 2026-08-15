@@ -46,16 +46,18 @@ async def _cut_one(source: Path, moment: Moment, output_dir: Path, url: str = ""
     dur = moment.end - moment.start
 
     if source.exists() and source.suffix.lower() == ".mp4":
+        # 1. First attempt: Precision cut with near-lossless master quality (CRF 14, no generation loss)
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-y",
             "-ss", str(moment.start),
             "-i", str(source),
             "-t", str(dur),
             "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "23",
+            "-preset", "fast",
+            "-crf", "14",
+            "-pix_fmt", "yuv420p",
             "-c:a", "aac",
-            "-b:a", "192k",
+            "-b:a", "320k",
             "-avoid_negative_ts", "make_zero",
             str(out_path),
             stdout=asyncio.subprocess.DEVNULL,
@@ -64,7 +66,7 @@ async def _cut_one(source: Path, moment: Moment, output_dir: Path, url: str = ""
         await proc.communicate()
 
         if not _is_valid_mp4(out_path):
-            logger.warning("Fast clip extraction produced invalid MP4 for clip %02d — retrying with safety re-encode", moment.index)
+            logger.warning("Fast clip extraction produced invalid MP4 for clip %02d — retrying with safety copy", moment.index)
             if out_path.exists():
                 try:
                     out_path.unlink(missing_ok=True)
@@ -75,8 +77,12 @@ async def _cut_one(source: Path, moment: Moment, output_dir: Path, url: str = ""
                 "-ss", str(moment.start),
                 "-i", str(source),
                 "-t", str(dur),
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "24",
+                "-c:v", "libx264",
+                "-preset", "medium",
+                "-crf", "16",
+                "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
+                "-b:a", "320k",
                 "-avoid_negative_ts", "make_zero",
                 str(out_path),
                 stdout=asyncio.subprocess.DEVNULL,

@@ -699,7 +699,7 @@ async def _download_hd_clip_from_hls(
         "-N", "16",
         "--concurrent-fragments", "16",
         "--download-sections", section,
-        "-f", "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=1080][vcodec^=avc]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/best",
+        "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best",
         "--merge-output-format", "mp4",
         "--force-overwrites",
         "-o", str(output_path),
@@ -729,10 +729,10 @@ async def _download_hd_clip_from_hls(
         "-t", str(duration),
         "-c:v", "libx264",
         "-c:a", "aac",
-        "-preset", "veryfast",
-        "-crf", "23",
-        "-maxrate", "8000k",
-        "-bufsize", "16000k",
+        "-preset", "fast",
+        "-crf", "15",
+        "-maxrate", "16000k",
+        "-bufsize", "32000k",
         str(output_path),
     ]
     proc = await asyncio.create_subprocess_exec(

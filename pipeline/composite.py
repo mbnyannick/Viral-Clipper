@@ -357,10 +357,10 @@ async def _composite_one(
         )
         sub_stage = _build_sub_stage(sub_file, enable_subtitles, aura_filter)
 
-        # Silky smooth HD background blur + Lanczos sharp main video scaling
+        # Silky smooth HD background blur + Studio Lanczos sharp main video scaling with edge clarity
         concat_v = (
             f"[0:v]scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,crop={CANVAS_W}:{CANVAS_H},boxblur=25:3[bg];"
-            f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=lanczos,{COLOR_ENHANCE}[fg];"
+            f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=lanczos+accurate_rnd+full_chroma_int,unsharp=5:5:0.5:5:5:0.0,{COLOR_ENHANCE}[fg];"
             f"[bg][fg]overlay=0:{video_top_y},setpts=PTS-STARTPTS[vbase];"
         )
 
@@ -386,7 +386,7 @@ async def _composite_one(
         bg_color_pad = bg_color.replace("#", "0x")
         sub_stage = _build_sub_stage(sub_file, enable_subtitles, aura_filter)
 
-        concat_v = f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h},{COLOR_ENHANCE},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},setpts=PTS-STARTPTS[vbase];"
+        concat_v = f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=lanczos+accurate_rnd+full_chroma_int,unsharp=5:5:0.5:5:5:0.0,{COLOR_ENHANCE},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},setpts=PTS-STARTPTS[vbase];"
 
         vf = (
             f"{concat_v}"
@@ -534,14 +534,23 @@ _COMPOSITE_SEMAPHORE = asyncio.Semaphore(1)
 
 
 def _get_v_encoder_args() -> list[str]:
+    import sys
     if sys.platform == "darwin":
-        return ["-c:v", "h264_videotoolbox", "-b:v", "12000k", "-movflags", "+faststart"]
+        return [
+            "-c:v", "h264_videotoolbox",
+            "-b:v", "16000k",
+            "-profile:v", "high",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+        ]
     return [
         "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "21",
-        "-maxrate", "12000k",
-        "-bufsize", "24000k",
+        "-preset", "medium",
+        "-crf", "17",
+        "-profile:v", "high",
+        "-level", "4.2",
+        "-maxrate", "16000k",
+        "-bufsize", "32000k",
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
     ]
