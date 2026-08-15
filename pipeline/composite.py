@@ -357,10 +357,10 @@ async def _composite_one(
         )
         sub_stage = _build_sub_stage(sub_file, enable_subtitles, aura_filter)
 
-        # Silky smooth HD background blur + Studio Lanczos sharp main video scaling with edge clarity
+        # Silky smooth HD background blur + Fast crisp main video scaling with edge clarity
         concat_v = (
-            f"[0:v]scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,crop={CANVAS_W}:{CANVAS_H},boxblur=25:3[bg];"
-            f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=lanczos+accurate_rnd+full_chroma_int,unsharp=5:5:0.5:5:5:0.0,{COLOR_ENHANCE}[fg];"
+            f"[0:v]scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,crop={CANVAS_W}:{CANVAS_H},boxblur=15:2[bg];"
+            f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=bicubic+accurate_rnd,unsharp=5:5:0.5:5:5:0.0,{COLOR_ENHANCE}[fg];"
             f"[bg][fg]overlay=0:{video_top_y},setpts=PTS-STARTPTS[vbase];"
         )
 
@@ -386,7 +386,7 @@ async def _composite_one(
         bg_color_pad = bg_color.replace("#", "0x")
         sub_stage = _build_sub_stage(sub_file, enable_subtitles, aura_filter)
 
-        concat_v = f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=lanczos+accurate_rnd+full_chroma_int,unsharp=5:5:0.5:5:5:0.0,{COLOR_ENHANCE},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},setpts=PTS-STARTPTS[vbase];"
+        concat_v = f"[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=bicubic+accurate_rnd,unsharp=5:5:0.5:5:5:0.0,{COLOR_ENHANCE},pad={CANVAS_W}:{CANVAS_H}:0:{video_top_y}:color={bg_color_pad},setpts=PTS-STARTPTS[vbase];"
 
         vf = (
             f"{concat_v}"
@@ -482,13 +482,15 @@ async def _composite_one(
     ]
 
 
+    from .clip import _is_valid_mp4
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300.0)
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=600.0)
         if proc.returncode != 0:
             err_str = stderr.decode(errors='replace')[-500:]
             logger.error("clip_%02d compositing failed (exit %d): %s", moment.index, proc.returncode, err_str)
@@ -509,24 +511,30 @@ async def _composite_one(
             "ffmpeg", "-y",
             "-i", str(clip_path),
             "-i", str(caption_path),
-            "-filter_complex", f"[0:v]scale=108:192:force_original_aspect_ratio=increase,crop=108:192,boxblur=4:1,scale={CANVAS_W}:{CANVAS_H}[bg];[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}[fg];[bg][fg]overlay=0:{video_top_y}[vbase];[vbase][1:v]overlay=0:0[out]",
+            "-filter_complex", f"[0:v]scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,crop={CANVAS_W}:{CANVAS_H},boxblur=10:1[bg];[0:v]{crop_filter_str},scale={CANVAS_W}:{scaled_h}:flags=bicubic[fg];[bg][fg]overlay=0:{video_top_y}[vbase];[vbase][1:v]overlay=0:0[out]",
             "-map", "[out]",
             "-map", "0:a?",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-pix_fmt", "yuv420p",
             "-c:a", "aac",
+            "-movflags", "+faststart",
             str(fb_out),
         ]
         try:
             p2 = await asyncio.create_subprocess_exec(*cmd_fallback, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-            _, err2 = await asyncio.wait_for(p2.communicate(), timeout=120.0)
-            if p2.returncode == 0 and fb_out.exists():
+            _, err2 = await asyncio.wait_for(p2.communicate(), timeout=240.0)
+            if p2.returncode == 0 and fb_out.exists() and _is_valid_mp4(fb_out):
                 shutil.move(fb_out, out_path)
             else:
                 logger.error("Fallback render failed: %s", err2.decode(errors='replace')[-300:])
         except Exception as fb_exc:
             logger.error("Fallback render exception: %s", fb_exc)
 
-    return out_path if (out_path.exists() and out_path.stat().st_size > 50000) else clip_path
+    if out_path.exists() and _is_valid_mp4(out_path):
+        return out_path
+    if clip_path.exists() and _is_valid_mp4(clip_path):
+        return clip_path
+    return out_path
 
 import sys
 
@@ -538,19 +546,20 @@ def _get_v_encoder_args() -> list[str]:
     if sys.platform == "darwin":
         return [
             "-c:v", "h264_videotoolbox",
-            "-b:v", "16000k",
+            "-b:v", "14000k",
             "-profile:v", "high",
             "-pix_fmt", "yuv420p",
             "-movflags", "+faststart",
         ]
     return [
         "-c:v", "libx264",
-        "-preset", "medium",
-        "-crf", "17",
+        "-preset", "fast",
+        "-crf", "18",
         "-profile:v", "high",
         "-level", "4.2",
-        "-maxrate", "16000k",
-        "-bufsize", "32000k",
+        "-threads", "0",
+        "-maxrate", "14000k",
+        "-bufsize", "28000k",
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
     ]

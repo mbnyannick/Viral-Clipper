@@ -713,9 +713,25 @@ async def _download_hd_clip_from_hls(
             stderr=asyncio.subprocess.PIPE,
         )
         _, stderr = await proc.communicate()
+        from pipeline.clip import _is_valid_mp4
         if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size >= 4096:
-            logger.info("yt-dlp HD clip section download complete: %s (%.1f MB)", output_path.name, output_path.stat().st_size / 1e6)
-            return output_path
+            # Fast remux to ensure valid moov atom and +faststart headers
+            remux_out = output_path.with_name(f"remux_{output_path.name}")
+            p_remux = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y", "-i", str(output_path),
+                "-c", "copy", "-movflags", "+faststart",
+                str(remux_out),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await p_remux.communicate()
+            if p_remux.returncode == 0 and remux_out.exists() and _is_valid_mp4(remux_out):
+                shutil.move(remux_out, output_path)
+                logger.info("yt-dlp HD clip section validated & ready: %s (%.1f MB)", output_path.name, output_path.stat().st_size / 1e6)
+                return output_path
+            elif _is_valid_mp4(output_path):
+                logger.info("yt-dlp HD clip section complete: %s (%.1f MB)", output_path.name, output_path.stat().st_size / 1e6)
+                return output_path
     except Exception as exc:
         logger.warning("yt-dlp section download failed for %s (%s) — falling back to FFmpeg", output_path.name, exc)
 
@@ -731,6 +747,8 @@ async def _download_hd_clip_from_hls(
         "-c:a", "aac",
         "-preset", "fast",
         "-crf", "15",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
         "-maxrate", "16000k",
         "-bufsize", "32000k",
         str(output_path),
