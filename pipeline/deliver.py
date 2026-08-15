@@ -88,10 +88,10 @@ async def deliver_clips(
             social_body = f"{caption_lines_text} {emoji}\n\n{rich_tags}"
 
             caption = (
-                f"🎬 <b>Clip {i:02d}/{total:02d}</b> • <b>{html.escape(streamer)}</b> ⚡ <i>Score: {score}/100 ({tier})</i>\n"
+                f"🎬 <b>Clip {i:02d}/{total:02d} • {html.escape(streamer)}</b> ⚡ <i>Score: {score}/100 ({tier})</i>\n"
                 f"💡 <i>{html.escape(reasoning)}</i>\n\n"
-                f"🔴 <b>YouTube Title:</b>\n<code>{html.escape(seo_title)}</code>\n\n"
-                f"📱 <b>Caption &amp; Hashtags:</b>\n<code>{html.escape(social_body)}</code>"
+                f"<code>{html.escape(seo_title)}</code>\n\n"
+                f"<code>{html.escape(social_body)}</code>"
             )
         else:
             caption = f"🎬 <b>Clip {i:02d}/{total:02d}</b>"

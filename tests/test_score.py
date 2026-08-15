@@ -216,3 +216,30 @@ def test_format_seo_title_handles_2_to_3_emojis():
     assert "🔥😂💀" in title
 
 
+def test_generate_rich_hashtags_strips_suffixes():
+    from pipeline.text_utils import generate_rich_hashtags
+    tags = generate_rich_hashtags(streamer="PlaqueBoyMaxLive", topic="Flop on Stream")
+    tag_list = tags.split()
+    assert "#PlaqueBoyMax" in tag_list
+    assert "#PlaqueBoyMaxLiveLive" not in tag_list
+
+
+def test_extract_title_and_caption_parses_cleanly_without_meta_headers():
+    from bot.handlers import _extract_title_and_caption
+    sample_caption = (
+        "🎬 <b>Clip 01/10 • PlaqueBoyMax</b> ⚡ <i>Score: 96/100 (S-Tier)</i>\n"
+        "💡 <i>High viral potential.</i>\n\n"
+        "🔴 <b>YouTube Title:</b>\n"
+        "<code>The Flop He Didn't See Coming 😂💀🔥</code>\n\n"
+        "📱 <b>Caption &amp; Hashtags:</b>\n"
+        "<code>Bro hits a HIP check he flops hard 😂💀🤣\n\n#PlaqueBoyMax #Shorts</code>"
+    )
+    title, desc = _extract_title_and_caption(sample_caption, "1")
+    assert "YouTube Title" not in title
+    assert "YouTube Title" not in desc
+    assert "The Flop He Didn't See Coming" in title
+    assert "Bro hits a HIP check" in desc
+    assert "#PlaqueBoyMax" in desc
+
+
+

@@ -1103,10 +1103,10 @@ async def run_streaming_pipeline(
             social_body = f"{caption_body} {emoji}\n\n{rich_tags}"
 
             video_caption = (
-                f"🎬 <b>Clip {clip_num:02d}</b> • <b>{html.escape(clean_streamer)}</b> [{mins}m{secs:02d}s] ⚡ <i>Score: {score}/100 ({tier})</i>\n"
+                f"🎬 <b>Clip {clip_num:02d} • {html.escape(clean_streamer)}</b> [{mins}m{secs:02d}s] ⚡ <i>Score: {score}/100 ({tier})</i>\n"
                 f"💡 <i>{html.escape(reasoning)}</i>\n\n"
-                f"🔴 <b>YouTube Title:</b>\n<code>{html.escape(seo_title)}</code>\n\n"
-                f"📱 <b>Caption &amp; Hashtags:</b>\n<code>{html.escape(social_body)}</code>"
+                f"<code>{html.escape(seo_title)}</code>\n\n"
+                f"<code>{html.escape(social_body)}</code>"
             )
             # Generate HD Cover Thumbnail capturing Aura Word (*FAIL*, *COOKED*) @ t=1.8s
             try:

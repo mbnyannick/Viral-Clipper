@@ -157,6 +157,9 @@ def generate_rich_hashtags(
     Combines creator tags, topic/action tags, viral trends, and platform discovery tags.
     """
     clean_streamer = re.sub(r"[^\w]", "", streamer.strip()) if streamer else "Streamer"
+    clean_streamer = re.sub(r"(Live|Clips|VODs?|Highlights|Shorts|Official)$", "", clean_streamer, flags=re.IGNORECASE).strip()
+    if not clean_streamer:
+        clean_streamer = "Streamer"
 
     tags: list[str] = []
     seen: set[str] = set()

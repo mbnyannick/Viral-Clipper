@@ -687,24 +687,72 @@ def _get_or_recover_session(chat_id: int, update: Update, query=None, context=No
 
 
 def _extract_title_and_caption(caption_text: str, clip_num: str) -> tuple[str, str]:
+    """
+    Extract the clean SEO title and social caption/hashtags from a video message.
+    Guarantees:
+    - Never includes meta headers ('🔴 YouTube Title:', '📱 Caption & Hashtags:', '🎬 Clip ...', '💡 ...').
+    - Pure high-CTR story title for YouTube/TikTok/Reels.
+    - Pure caption body + hashtags for video description.
+    """
     if not caption_text:
-        return f"Viral Clip #{clip_num} 😱", f"Check out this clip! #Shorts #Viral"
+        return f"Viral Clip #{clip_num} 🔥😂💀", "#Shorts #Viral"
 
-    lines = [line.strip() for line in caption_text.splitlines() if line.strip()]
-    content_lines = [
-        line for line in lines
-        if not (line.startswith("📹") or line.startswith("💡") or line.startswith("🎬"))
-    ]
+    raw = caption_text
 
-    if content_lines:
-        raw_title = content_lines[0]
-        title_clean = format_seo_title(raw_title, default_emoji="😱")
-        description = "\n\n".join(content_lines)
-        if "#Shorts" not in description and "#shorts" not in description:
-            description = f"{description}\n\n#Shorts #Viral"
-        return title_clean, description
+    # 1. Preferred: Extract from <code>...</code> blocks if HTML formatted
+    code_blocks = re.findall(r"<code>(.*?)</code>", raw, flags=re.DOTALL)
+    if code_blocks:
+        code_cleaned = [html.unescape(b).strip() for b in code_blocks if b.strip()]
+        # Strip any accidental label inside the code block
+        code_cleaned = [
+            re.sub(r"(?i)^(?:🔴|📱|📋)?\s*(?:YouTube\s*Title|Caption\s*&?\s*Hashtags?):?\s*", "", b).strip()
+            for b in code_cleaned
+        ]
+        code_cleaned = [b for b in code_cleaned if b]
 
-    return f"Viral Clip #{clip_num} 😱", f"{caption_text}\n\n#Shorts #Viral"
+        if len(code_cleaned) >= 2:
+            title = format_seo_title(code_cleaned[0], default_emoji="🔥😂💀")
+            description = code_cleaned[1]
+            return title, description
+        elif len(code_cleaned) == 1:
+            block = code_cleaned[0]
+            parts = [p.strip() for p in block.split("\n\n") if p.strip()]
+            if len(parts) >= 2:
+                title = format_seo_title(parts[0], default_emoji="🔥😂💀")
+                description = "\n\n".join(parts[1:])
+                return title, description
+
+    # 2. Plain text / fallback extraction: Strip HTML tags
+    clean_text = re.sub(r"<[^>]+>", "", raw)
+    clean_text = html.unescape(clean_text)
+
+    # 3. Filter out meta headers and literal label rows
+    lines = []
+    for line in clean_text.splitlines():
+        line_s = line.strip()
+        if not line_s:
+            continue
+        # Filter out clip headers, reasoning lines, and literal label markers
+        if re.match(r"^(?:🎬|📹|💡|🔴|📱|📋)?\s*(?:Clip\s*\d+|Hook\s*Score|Reasoning|YouTube\s*Title|Caption\s*&?\s*Hashtags?):?", line_s, flags=re.IGNORECASE):
+            continue
+        lines.append(line_s)
+
+    if not lines:
+        return f"Viral Clip #{clip_num} 🔥😂💀", "#Shorts #Viral"
+
+    # First non-header line is the clean SEO Title
+    title = format_seo_title(lines[0], default_emoji="🔥😂💀")
+
+    # Remaining lines form the description and hashtags
+    if len(lines) > 1:
+        description = "\n\n".join(lines[1:])
+    else:
+        description = f"{title}\n\n#Shorts #Viral"
+
+    # Clean any leftover meta prefixes from description
+    description = re.sub(r"(?i)^(?:🔴|📱|📋)?\s*(?:YouTube\s*Title|Caption\s*&?\s*Hashtags?):?\s*", "", description).strip()
+
+    return title, description
 
 
 def _update_keyboard_posting(reply_markup: InlineKeyboardMarkup, platform: str) -> InlineKeyboardMarkup:
