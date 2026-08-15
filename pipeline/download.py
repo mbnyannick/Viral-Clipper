@@ -401,13 +401,12 @@ def _get_cookie_opts() -> list[str]:
 def _get_pot_opts() -> list[str]:
     """Return yt-dlp extractor args to connect to the bgutil PO Token provider service."""
     import os
-    pot_base = os.environ.get("YTDLP_POT_BASE_URL", "http://172.17.0.1:4416").strip()
+    pot_base = os.environ.get("YTDLP_POT_BASE_URL", "http://bgutil-pot:4416").strip()
     if pot_base:
         return [
             "--extractor-args", f"youtubepot-bgutilhttp:base_url={pot_base}",
-            "--extractor-args", "youtube:player_client=ios,android",
         ]
-    return ["--extractor-args", "youtube:player_client=ios,android"]
+    return []
 
 
 def _get_proxy_opts() -> list[str]:
@@ -456,33 +455,28 @@ def detect_platform_and_type(url: str, is_live_flag: str = "") -> tuple[str, str
         platform = "YouTube 🔴"
         if "shorts" in u:
             content_type = "Shorts 📱"
-            live_status = "📁 Shorts Video"
-        elif is_live:
+            live_status = "📁 Recorded Short"
+        elif "/live" in u or is_live:
             content_type = "Livestream 🔴"
             live_status = "🔴 LIVE NOW"
         else:
             content_type = "Video 🎥"
             live_status = "📁 Recorded Video"
     else:
-        platform = "Web Stream 🌐"
-        content_type = "Video 🎥"
-        live_status = "📁 Recorded Video"
+        platform = "Video 🎥"
+        content_type = "Uploaded Video"
+        live_status = "📁 File"
 
     return platform, content_type, live_status
 
 
-# Cookie-less trusted mobile/embedded clients FIRST — YouTube's bot detection
-# is relaxed for these, and not attaching a logged-in session to datacenter
-# traffic protects the fresh VM IP from being re-flagged.
-# Cookie-using clients (web/tv/mweb) come later as fallback.
+# yt-dlp client fallback chain
 YT_CLIENT_CHAINS = [
-    ["--extractor-args", "youtube:player_client=android_vr"],
-    ["--extractor-args", "youtube:player_client=ios"],
-    ["--extractor-args", "youtube:player_client=tv_embedded,android_vr"],
-    ["--extractor-args", "youtube:player_client=android"],
-    [],  # Default web client (required for cookies.txt authentication)
-    ["--extractor-args", "youtube:player_client=web"],
-    ["--extractor-args", "youtube:player_client=mweb"],
+    [],  # Default web/tv client (authenticated with cookies.txt)
+    ["--extractor-args", "youtube:player_client=ios,web"],
+    ["--extractor-args", "youtube:player_client=android,web"],
+    ["--extractor-args", "youtube:player_client=mweb,web"],
+    ["--extractor-args", "youtube:player_client=tv_embedded"],
 ]
 
 # YouTube intermittently issues "Sign in to confirm you're not a bot" challenges
