@@ -726,14 +726,16 @@ def _extract_title_and_caption(caption_text: str, clip_num: str) -> tuple[str, s
     clean_text = re.sub(r"<[^>]+>", "", raw)
     clean_text = html.unescape(clean_text)
 
-    # 3. Filter out meta headers and literal label rows
+    # 3. Filter out meta headers, reasoning lines, and literal label rows
     lines = []
     for line in clean_text.splitlines():
         line_s = line.strip()
         if not line_s:
             continue
-        # Filter out clip headers, reasoning lines, and literal label markers
-        if re.match(r"^(?:🎬|📹|💡|🔴|📱|📋)?\s*(?:Clip\s*\d+|Hook\s*Score|Reasoning|YouTube\s*Title|Caption\s*&?\s*Hashtags?):?", line_s, flags=re.IGNORECASE):
+        # Filter out clip headers, reasoning lines (starting with 💡), and literal label markers
+        if line_s.startswith("💡") or line_s.startswith("🎬") or line_s.startswith("📹") or line_s.startswith("🔴") or line_s.startswith("📱") or line_s.startswith("📋"):
+            continue
+        if re.match(r"^(?:Clip\s*\d+|Hook\s*Score|Reasoning|YouTube\s*Title|Caption\s*&?\s*Hashtags?):?", line_s, flags=re.IGNORECASE):
             continue
         lines.append(line_s)
 
@@ -764,8 +766,16 @@ def _update_keyboard_posting(reply_markup: InlineKeyboardMarkup, platform: str) 
         new_row = []
         for btn in row:
             cb_data = btn.callback_data or ""
-            if platform == "all" or f"post:{platform}:" in cb_data or f"sched:{platform}:" in cb_data:
-                label = "TikTok" if "tiktok" in cb_data else ("YouTube" if "youtube" in cb_data else ("IG Reels" if "instagram" in cb_data else ("Facebook" if "facebook" in cb_data else "ALL")))
+            if platform == "all":
+                if "post:" in cb_data or "sched:" in cb_data:
+                    label = "TikTok" if "tiktok" in cb_data else ("YouTube" if "youtube" in cb_data else ("IG Reels" if "instagram" in cb_data else ("Facebook" if "facebook" in cb_data else "ALL")))
+                    action_word = "Scheduled" if "sched:" in cb_data else "Posted"
+                    new_row.append(InlineKeyboardButton(text=f"✅ {label}", callback_data=cb_data))
+                else:
+                    new_row.append(btn)
+            elif f"post:{platform}:" in cb_data or f"sched:{platform}:" in cb_data:
+                label = "TikTok" if "tiktok" in cb_data else ("YouTube" if "youtube" in cb_data else ("IG Reels" if "instagram" in cb_data else ("Facebook" if "facebook" in cb_data else platform.title())))
+                action_word = "Scheduled" if "sched:" in cb_data else "Posted"
                 new_row.append(InlineKeyboardButton(text=f"⏳ Posting to {label}...", callback_data=cb_data))
             else:
                 new_row.append(btn)
@@ -817,6 +827,14 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
     msg = query.message if query else None
     logger.info("⚡ [POST BUTTON TAPPED] platform=%s, clip_num=%s, chat_id=%s", platform, clip_num, chat_id)
 
+    # Immediately answer callback query to prevent Telegram query timeout
+    if query:
+        try:
+            plat_label = "ALL Platforms" if platform == "all" else platform.upper()
+            await query.answer(f"🚀 Publishing to {plat_label}...", show_alert=False)
+        except Exception as q_exc:
+            logger.debug("Could not answer callback query immediately: %s", q_exc)
+
     webhook_url = os.environ.get("N8N_WEBHOOK_URL", os.environ.get("MAKE_WEBHOOK_URL", f"{get_public_base_url()}/webhook/viral-post")).strip()
     if not webhook_url:
         if query:
@@ -828,7 +846,7 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
         await _safe_edit_message_reply_markup(query, reply_markup=posting_kb)
 
     video_url = ""
-    raw_caption = msg.caption if msg and msg.caption else ""
+    raw_caption = (msg.caption_html if hasattr(msg, "caption_html") and msg.caption_html else msg.caption) if msg else ""
     title_text, clean_caption = _extract_title_and_caption(raw_caption, clip_num)
     extracted_hashtags = " ".join([w for w in clean_caption.split() if w.startswith("#")]) or "#Viral #Shorts"
     clips_dir = Path("tmp/clips")
