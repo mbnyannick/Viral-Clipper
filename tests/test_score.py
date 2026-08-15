@@ -242,4 +242,24 @@ def test_extract_title_and_caption_parses_cleanly_without_meta_headers():
     assert "#PlaqueBoyMax" in desc
 
 
+def test_clean_and_deduplicate_content_removes_duplicate_hashtag_blocks():
+    from bot.social_publisher import _clean_and_deduplicate_content
+    caption = (
+        "Bro Flops and Gets Called Out for It 😂🔥😱\n\n"
+        "BRO TRIES A FLOP streamer calls it out then they ARGUE about hip check 😱🤣🔥\n\n"
+        "#PlaqueBoyMax #PlaqueBoyMaxClips #Shorts #ViralClips"
+    )
+    duplicate_hashtags = "#PlaqueBoyMax #PlaqueBoyMaxClips #Shorts #ViralClips #NewTag"
+    result = _clean_and_deduplicate_content(caption, duplicate_hashtags)
+
+    words = result.split()
+    assert words.count("#PlaqueBoyMax") == 1
+    assert words.count("#PlaqueBoyMaxClips") == 1
+    assert words.count("#Shorts") == 1
+    assert words.count("#ViralClips") == 1
+    assert "#NewTag" in words
+    assert "Bro Flops and Gets Called Out for It" in result
+
+
+
 

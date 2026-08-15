@@ -165,13 +165,71 @@ def publish_to_woopsocial(platform: str, title: str, content: str, video_url: st
         return False, str(exc)
 
 
+def _clean_and_deduplicate_content(caption: str, hashtags: str = "") -> str:
+    """
+    Clean, structure, and strictly deduplicate caption content and hashtags.
+    Guarantees:
+    - Never duplicates hashtags.
+    - Preserves story body lines.
+    - Places exactly ONE clean, deduplicated hashtag block at the bottom.
+    """
+    combined = f"{caption}\n\n{hashtags}".strip() if hashtags else str(caption or "").strip()
+    lines = combined.splitlines()
+    body_lines: list[str] = []
+    seen_tags: set[str] = set()
+    unique_tags: list[str] = []
+
+    for line in lines:
+        words = line.split()
+        if not words:
+            if body_lines and body_lines[-1] != "":
+                body_lines.append("")
+            continue
+
+        # Check if entire line is hashtags
+        is_tag_only = all(w.startswith("#") for w in words)
+        if is_tag_only:
+            for w in words:
+                clean_tag = w.strip()
+                tag_lower = clean_tag.lower()
+                if tag_lower not in seen_tags:
+                    seen_tags.add(tag_lower)
+                    unique_tags.append(clean_tag)
+        else:
+            line_body_words = []
+            for w in words:
+                if w.startswith("#"):
+                    clean_tag = w.strip()
+                    tag_lower = clean_tag.lower()
+                    if tag_lower not in seen_tags:
+                        seen_tags.add(tag_lower)
+                        unique_tags.append(clean_tag)
+                else:
+                    line_body_words.append(w)
+            if line_body_words:
+                body_lines.append(" ".join(line_body_words))
+
+    # Strip empty trailing lines from body
+    while body_lines and not body_lines[-1].strip():
+        body_lines.pop()
+
+    clean_body = "\n".join(body_lines).strip()
+    tag_str = " ".join(unique_tags).strip()
+
+    if clean_body and tag_str:
+        return f"{clean_body}\n\n{tag_str}"
+    elif clean_body:
+        return clean_body
+    return tag_str
+
+
 def direct_publish_clip(platform: str, title: str, caption: str, hashtags: str, video_url: str) -> dict[str, tuple[bool, str]]:
     """
     Directly publishes to the requested platform or all 4 platforms simultaneously.
     Returns a dict of {platform_name: (success_bool, message)}.
     """
     targets = ["tiktok", "youtube", "instagram", "facebook"] if platform.lower() == "all" else [platform.lower()]
-    full_content = f"{caption}\n\n{hashtags}".strip() if hashtags else caption
+    full_content = _clean_and_deduplicate_content(caption, hashtags)
 
     results = {}
     for p in targets:
