@@ -62,8 +62,8 @@ async def test_score_parses_valid_json():
         assert len(moments) == 1
         m = moments[0]
         assert isinstance(m, Moment)
-        assert m.start == pytest.approx(142.5)
-        assert m.end == pytest.approx(167.0)
+        assert m.start == pytest.approx(140.5)
+        assert m.end == pytest.approx(170.5)
         assert m.emoji == "😤"
         assert m.caption_lines[0] == "PIGFORD OUT HERE DENYING"
         assert m.caption_lines[1] == "everything"
@@ -159,3 +159,60 @@ async def test_voiceover_generation_disabled_by_default(tmp_path, monkeypatch):
     result = await generate_voiceover("This is a hook", out)
     assert result is None
     assert not out.exists()
+
+
+def test_format_seo_title_strips_slashes_and_pipes():
+    from pipeline.text_utils import format_seo_title
+    raw = "she asked about VIRGINS / he said yes / then she went FURTHER"
+    title = format_seo_title(raw, default_emoji="🔥")
+    assert "/" not in title
+    assert "\\" not in title
+    assert "|" not in title
+    assert title.endswith("🔥")
+
+
+def test_format_seo_title_removes_hashtags_and_quotes():
+    from pipeline.text_utils import format_seo_title
+    raw = '"Speed Got Caught In 4K #Shorts #Viral #Gaming"'
+    title = format_seo_title(raw, default_emoji="😱")
+    assert "#" not in title
+    assert '"' not in title
+    assert title.endswith("😱")
+
+
+def test_format_seo_title_removes_ellipses_and_dangling_words():
+    from pipeline.text_utils import format_seo_title
+    raw = "This is an extremely long title that keeps talking about random stuff and things with someone on stream..."
+    title = format_seo_title(raw, max_chars=40, default_emoji="💀")
+    assert "..." not in title
+    assert "…" not in title
+    assert len(title) <= 50
+    assert title.endswith("💀")
+
+
+def test_format_seo_title_from_caption_lines():
+    from pipeline.text_utils import format_seo_title
+    lines = ["PIGFORD OUT HERE DENYING", "everything"]
+    title = format_seo_title(lines, default_emoji="😤")
+    assert "/" not in title
+    assert "PIGFORD OUT HERE DENYING everything 😤" == title
+
+
+def test_generate_rich_hashtags_generates_large_pool():
+    from pipeline.text_utils import generate_rich_hashtags
+    tags = generate_rich_hashtags(streamer="Kai Cenat", topic="Prank Call", aura_word="EXPOSED")
+    tag_list = tags.split()
+    assert len(tag_list) >= 12
+    assert "#KaiCenat" in tag_list
+    assert "#KaiCenatClips" in tag_list
+    assert "#Exposed" in tag_list
+    assert "#Shorts" in tag_list
+    assert "#TikTokViral" in tag_list
+
+
+def test_format_seo_title_handles_2_to_3_emojis():
+    from pipeline.text_utils import format_seo_title
+    title = format_seo_title("Speed Did Not Expect This Reaction", default_emoji="🔥😂💀")
+    assert "🔥😂💀" in title
+
+

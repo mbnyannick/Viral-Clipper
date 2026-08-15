@@ -25,6 +25,7 @@ from pipeline.composite import composite_clips
 from pipeline.deliver import deliver_clips
 from pipeline.errors import PipelineError
 from pipeline.streaming_pipeline import run_streaming_pipeline
+from pipeline.text_utils import format_seo_title
 from pipeline import get_public_base_url
 
 logger = logging.getLogger(__name__)
@@ -223,6 +224,8 @@ async def run_pipeline(
                 stream_start_sec=start_sec,
                 stream_end_sec=end_sec,
                 chunk_minutes=streaming_chunk_min,
+                target_total_clips=target_total,
+                campaign_brief=campaign_brief,
                 target_duration=target_duration,
                 enable_subtitles=enable_subtitles,
             )
@@ -494,16 +497,14 @@ async def run_pipeline(
             for idx, (clip_path, m) in enumerate(zip(final_clips, moments or []), start=1):
                 if not clip_path or not Path(clip_path).exists():
                     continue
-                safe_fid = "".join(c for c in clip_path.name if c.isalnum())[:20]
-                public_filename = f"clip_{safe_fid}.mp4"
+                public_filename = f"clip_{idx:03d}.mp4"
                 public_path = clips_public_dir / public_filename
                 try:
-                    if not public_path.exists():
-                        shutil.copy2(clip_path, public_path)
+                    shutil.copy2(clip_path, public_path)
                     video_url = f"{get_public_base_url()}/clips/{public_filename}"
                 except Exception:
                     video_url = ""
-                raw_title = getattr(m, "title", "") or getattr(m, "caption_lines", [""])[0]
+                raw_title = format_seo_title(getattr(m, "title", "") or getattr(m, "caption_lines", [""]), default_emoji=getattr(m, "emoji", "🔥"))
                 hashtags = getattr(m, "hashtags", "") or ""
                 payload_base = {
                     "clip_id": f"clip_{idx:03d}",

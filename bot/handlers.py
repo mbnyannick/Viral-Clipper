@@ -19,6 +19,7 @@ from telegram.ext import ContextTypes
 from bot.run_pipeline import run_pipeline
 from bot.scheduler import next_peak_slot, scheduler
 from pipeline import get_public_base_url
+from pipeline.text_utils import format_seo_title, generate_rich_hashtags
 
 logger = logging.getLogger(__name__)
 
@@ -687,7 +688,7 @@ def _get_or_recover_session(chat_id: int, update: Update, query=None, context=No
 
 def _extract_title_and_caption(caption_text: str, clip_num: str) -> tuple[str, str]:
     if not caption_text:
-        return f"Viral Clip #{clip_num} #Shorts", f"Viral Clip #{clip_num}\n#Shorts #Viral"
+        return f"Viral Clip #{clip_num} 😱", f"Check out this clip! #Shorts #Viral"
 
     lines = [line.strip() for line in caption_text.splitlines() if line.strip()]
     content_lines = [
@@ -696,13 +697,14 @@ def _extract_title_and_caption(caption_text: str, clip_num: str) -> tuple[str, s
     ]
 
     if content_lines:
-        title = content_lines[0]
-        if "#Shorts" not in title and "#shorts" not in title:
-            title = f"{title} #Shorts"
+        raw_title = content_lines[0]
+        title_clean = format_seo_title(raw_title, default_emoji="😱")
         description = "\n\n".join(content_lines)
-        return title, description
+        if "#Shorts" not in description and "#shorts" not in description:
+            description = f"{description}\n\n#Shorts #Viral"
+        return title_clean, description
 
-    return f"Viral Clip #{clip_num} #Shorts", caption_text
+    return f"Viral Clip #{clip_num} 😱", f"{caption_text}\n\n#Shorts #Viral"
 
 
 def _update_keyboard_posting(reply_markup: InlineKeyboardMarkup, platform: str) -> InlineKeyboardMarkup:
@@ -732,9 +734,29 @@ def _update_keyboard_posted(reply_markup: InlineKeyboardMarkup, platform: str) -
         new_row = []
         for btn in row:
             cb_data = btn.callback_data or ""
-            if platform == "all" or f"post:{platform}:" in cb_data or f"sched:{platform}:" in cb_data:
-                label = "TikTok" if "tiktok" in cb_data else ("YouTube" if "youtube" in cb_data else ("IG Reels" if "instagram" in cb_data else ("Facebook" if "facebook" in cb_data else "ALL")))
-                new_row.append(InlineKeyboardButton(text=f"✅ Posted to {label}", callback_data=f"done:{label.lower()}"))
+            btn_text = btn.text
+            if platform == "all":
+                if "post:all" in cb_data or "sched:all" in cb_data or "post:" in cb_data or "sched:" in cb_data:
+                    if "post:all" in cb_data:
+                        new_row.append(InlineKeyboardButton(text="✅ Posted to ALL", callback_data=cb_data))
+                    elif "sched:all" in cb_data:
+                        new_row.append(InlineKeyboardButton(text="✅ Scheduled (Peak)", callback_data=cb_data))
+                    elif "tiktok" in cb_data:
+                        new_row.append(InlineKeyboardButton(text="✅ TikTok", callback_data=cb_data))
+                    elif "youtube" in cb_data:
+                        new_row.append(InlineKeyboardButton(text="✅ YouTube", callback_data=cb_data))
+                    elif "instagram" in cb_data:
+                        new_row.append(InlineKeyboardButton(text="✅ IG Reels", callback_data=cb_data))
+                    elif "facebook" in cb_data:
+                        new_row.append(InlineKeyboardButton(text="✅ Facebook", callback_data=cb_data))
+                    else:
+                        new_row.append(btn)
+                else:
+                    new_row.append(btn)
+            elif f"post:{platform}:" in cb_data or f"sched:{platform}:" in cb_data:
+                label = "TikTok" if "tiktok" in cb_data else ("YouTube" if "youtube" in cb_data else ("IG Reels" if "instagram" in cb_data else ("Facebook" if "facebook" in cb_data else platform.title())))
+                action_word = "Scheduled" if "sched:" in cb_data else "Posted"
+                new_row.append(InlineKeyboardButton(text=f"✅ {label}", callback_data=cb_data))
             else:
                 new_row.append(btn)
         new_rows.append(new_row)
@@ -747,7 +769,7 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
     msg = query.message if query else None
     logger.info("⚡ [POST BUTTON TAPPED] platform=%s, clip_num=%s, chat_id=%s", platform, clip_num, chat_id)
 
-    webhook_url = os.environ.get("MAKE_WEBHOOK_URL", f"{get_public_base_url()}/webhook/viral-post").strip()
+    webhook_url = os.environ.get("N8N_WEBHOOK_URL", os.environ.get("MAKE_WEBHOOK_URL", f"{get_public_base_url()}/webhook/viral-post")).strip()
     if not webhook_url:
         if query:
             await query.answer("⚠️ No Webhook URL set.", show_alert=True)
@@ -775,7 +797,7 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
         if f"clip_{c_num:03d}" in f.name or f"clip_{c_num:02d}" in f.name or f"clip_{c_num}." in f.name or f"_{c_num:02d}." in f.name or f"_{c_num:03d}." in f.name
     ]
     if matching_clips:
-        video_url = f"https://150-136-108-208.sslip.io/clips/{matching_clips[0].name}"
+        video_url = f"{get_public_base_url()}/clips/{matching_clips[0].name}"
         logger.info("  Instant local disk clip match: %s", video_url)
 
     # 2. Telegram File download fallback (only if file is missing on disk)
@@ -794,11 +816,15 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
             logger.warning("Could not download Telegram video file: %s", f_exc)
 
     if not video_url:
-        video_url = f"https://150-136-108-208.sslip.io/clips/clip_{c_num:03d}.mp4"
+        video_url = f"{get_public_base_url()}/clips/clip_{c_num:03d}.mp4"
 
     def _post_json_sync(url: str, post_data: dict) -> tuple[int, str]:
         import json
         import urllib.request
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
         data_bytes = json.dumps(post_data).encode("utf-8")
         req = urllib.request.Request(
             url,
@@ -810,34 +836,12 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
             },
             method="POST"
         )
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with urllib.request.urlopen(req, timeout=1.5, context=ctx) as response:
             return response.status, response.read().decode("utf-8", errors="replace")
 
     target_platforms = ["tiktok", "youtube", "instagram", "facebook"] if platform == "all" else [platform]
-
-    for p in target_platforms:
-        payload = {
-            "platform": p,
-            "clip_id": f"clip_{int(clip_num):03d}",
-            "title": title_text,
-            "caption": clean_caption,
-            "description": clean_caption,
-            "video_url": video_url,
-            "thumbnail_url": f"{get_public_base_url()}/clips/thumbnail_{int(clip_num)-1:02d}.jpg",
-            "cover_timestamp_ms": 1800,
-            "video_filename": f"clip_{int(clip_num):03d}.mp4",
-            "mime_type": "video/mp4",
-            "hashtags": extracted_hashtags,
-            "chat_id": chat_id,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }
-        logger.info("Publishing clip to platform '%s', clip_num %s, video_url='%s'", p, clip_num, video_url)
-        try:
-            status_code, body_text = await asyncio.to_thread(_post_json_sync, webhook_url, payload)
-            logger.info("Publisher status for %s: %s", p, status_code)
-        except Exception as http_exc:
-            logger.warning("Publisher request failed for %s: %s", p, http_exc)
-
+    
+    # Instantly update keyboard to green posted state
     if msg and msg.reply_markup:
         try:
             posted_kb = _update_keyboard_posted(msg.reply_markup, platform)
@@ -845,14 +849,52 @@ async def _handle_social_post_button(update: Update, context: ContextTypes.DEFAU
         except Exception as k_exc:
             logger.warning("Could not update keyboard to posted state: %s", k_exc)
 
-    display_plat = "ALL PLATFORMS" if platform == "all" else platform.upper()
-    await msg.reply_text(
-        f"✅ **Sent to Publisher!**\n\n"
-        f"• **Platform:** `{display_plat}`\n"
-        f"• **Clip:** #{clip_num}\n"
-        f"• **Status:** Publishing Triggered Successfully",
-        parse_mode="Markdown",
+    from .social_publisher import direct_publish_clip
+
+    # 1. Dispatch directly to Social APIs (Zernio for TikTok/YouTube, WoopSocial for Instagram/Facebook)
+    pub_results = await asyncio.to_thread(
+        direct_publish_clip,
+        platform,
+        title_text,
+        clean_caption,
+        extracted_hashtags,
+        video_url,
     )
+    logger.info("Direct social publish results for clip #%s: %s", clip_num, pub_results)
+
+    success_count = sum(1 for (ok, _) in pub_results.values() if ok)
+    display_plat = "ALL PLATFORMS" if platform == "all" else platform.upper()
+
+    # Save to local publication log
+    try:
+        pub_log = Path("tmp/published_clips.json")
+        pub_data = []
+        if pub_log.exists():
+            pub_data = json.loads(pub_log.read_text(encoding="utf-8"))
+        pub_data.append({
+            "clip_num": clip_num,
+            "platform": platform,
+            "video_url": video_url,
+            "title": title_text,
+            "caption": clean_caption,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        })
+        pub_log.write_text(json.dumps(pub_data, indent=2), encoding="utf-8")
+    except Exception as log_exc:
+        logger.warning("Could not append to published_clips.json: %s", log_exc)
+
+    # Instantly update keyboard on the video to show permanent blue tick / checkmark without popup text spam
+    if msg and msg.reply_markup:
+        try:
+            posted_kb = _update_keyboard_posted(msg.reply_markup, platform)
+            await _safe_edit_message_reply_markup(query, reply_markup=posted_kb)
+        except Exception as k_exc:
+            logger.warning("Could not update keyboard to posted state: %s", k_exc)
+
+    if query:
+        plat_label = "ALL Platforms" if platform == "all" else platform.upper()
+        await query.answer(f"✅ Dispatched to {plat_label}!", show_alert=False)
+
     return
 
 
@@ -1040,28 +1082,30 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         except ValueError:
             c_num = 1
 
-        if msg and msg.video:
+        # 1. Instant local disk lookup
+        matching_clips = [
+            f for f in clips_dir.glob("*.mp4")
+            if f"clip_{c_num:03d}" in f.name or f"clip_{c_num:02d}" in f.name or f"clip_{c_num}." in f.name or f"_{c_num:02d}." in f.name or f"_{c_num:03d}." in f.name
+        ]
+        if matching_clips:
+            video_url = f"{get_public_base_url()}/clips/{matching_clips[0].name}"
+
+        # 2. Telegram File download fallback (only if file missing from local disk)
+        if not video_url and msg and msg.video:
             try:
                 safe_fid = "".join(c for c in msg.video.file_id if c.isalnum())[:20]
                 public_filename = f"clip_msg_{safe_fid}.mp4"
                 public_path = clips_dir / public_filename
                 if not public_path.exists():
-                    tg_file = await asyncio.wait_for(context.bot.get_file(msg.video.file_id), timeout=6.0)
-                    await asyncio.wait_for(tg_file.download_to_drive(public_path), timeout=12.0)
+                    tg_file = await asyncio.wait_for(context.bot.get_file(msg.video.file_id), timeout=30.0)
+                    await asyncio.wait_for(tg_file.download_to_drive(public_path), timeout=45.0)
                 if public_path.exists() and public_path.stat().st_size > 1000:
                     video_url = f"{get_public_base_url()}/clips/{public_filename}"
             except Exception as exc:
                 logger.warning("Scheduler: could not resolve video URL from Telegram msg: %s", exc)
 
         if not video_url:
-            matching_clips = [
-                f for f in clips_dir.glob("*.mp4")
-                if f"clip_{c_num:03d}" in f.name or f"clip_{c_num:02d}" in f.name or f"clip_{c_num}." in f.name or f"_{c_num:02d}." in f.name or f"_{c_num:03d}." in f.name
-            ]
-            if matching_clips:
-                video_url = f"{get_public_base_url()}/clips/{matching_clips[0].name}"
-            else:
-                video_url = f"{get_public_base_url()}/clips/clip_{c_num:03d}.mp4"
+            video_url = f"{get_public_base_url()}/clips/clip_{c_num:03d}.mp4"
 
         platforms = ["tiktok", "instagram", "facebook", "youtube"] if sched_platform == "all" else [sched_platform]
 
@@ -1079,34 +1123,61 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         scheduler.schedule_clip_staggered(platforms, base_payload)
 
-        preview = scheduler.get_schedule_preview(clip_num, platforms)
-        await query.answer("📅 Scheduled!", show_alert=False)
-        await query.message.reply_text(preview, parse_mode="HTML")
+        # Update button to scheduled checkmark state without popup spam text
+        if msg and msg.reply_markup:
+            try:
+                posted_kb = _update_keyboard_posted(msg.reply_markup, sched_platform)
+                await _safe_edit_message_reply_markup(query, reply_markup=posted_kb)
+            except Exception as k_exc:
+                logger.warning("Could not update keyboard to scheduled state: %s", k_exc)
+
+        await query.answer("📅 Scheduled for peak time!", show_alert=False)
         return
 
     if data.startswith("pub:mobile:"):
         clip_num = data.split("pub:mobile:")[1]
         msg = query.message if query else None
         raw_caption = msg.caption if msg and msg.caption else ""
-        title_text, clean_caption, extracted_hashtags = _extract_title_and_caption(raw_caption, clip_num)
+        title_text, clean_caption = _extract_title_and_caption(raw_caption, clip_num)
 
-        await query.answer(f"📱 1-Tap Copy for Clip #{clip_num}!", show_alert=True)
+        # Split caption body from hashtag block
+        caption_parts = clean_caption.split("\n\n")
+        caption_body = caption_parts[0].strip() if caption_parts else clean_caption
+        inline_tags = " ".join([w for w in clean_caption.split() if w.startswith("#")])
+        rich_tags = generate_rich_hashtags(topic=title_text, existing_hashtags=inline_tags)
 
-        copy_text = f"{title_text}\n\n{clean_caption}\n\n{extracted_hashtags}".strip()
+        # YouTube Shorts: Clean SEO title with 2-3 emojis + full description
+        yt_copy = format_seo_title(title_text, default_emoji="🔥😂💀")
+        yt_desc = f"{caption_body}\n\n{rich_tags}"
+
+        # Unified TikTok / Instagram / Facebook Reels block
+        unified_copy = f"{caption_body} 🔥😂💀\n\n{rich_tags}"
+
+        await query.answer(f"📋 Copy captions for Clip #{clip_num}!", show_alert=False)
+
         copy_card = (
-            f"📱 <b>TikTok & Mobile Upload Ready for Clip #{clip_num}!</b>\n\n"
-            f"👇 <i>Tap the box below ONCE to copy Title + Hashtags:</i>\n\n"
-            f"<code>{html.escape(copy_text)}</code>\n\n"
-            f"💡 <i>Steps: Tap to copy box ➔ Long-press video to save to camera roll ➔ Open TikTok & paste!</i>"
+            f"📋 <b>Clip #{clip_num} — Tap to Copy &amp; Post Manually</b>\n\n"
+            f"🔴 <b>YouTube Shorts Title</b> <i>(2–3 emojis, high CTR):</i>\n"
+            f"<code>{html.escape(yt_copy)}</code>\n\n"
+            f"📝 <b>YouTube Shorts Description &amp; Hashtags:</b>\n"
+            f"<code>{html.escape(yt_desc)}</code>\n\n"
+            f"📱 <b>TikTok / Instagram / Facebook Reels Caption &amp; Hashtags:</b>\n"
+            f"<code>{html.escape(unified_copy)}</code>\n\n"
+            f"<i>💡 Tap any code box once to copy, then paste directly into the app!</i>"
         )
 
-        open_tt_kb = InlineKeyboardMarkup([
+        quick_links_kb = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("📲 Open TikTok App", url="https://www.tiktok.com/"),
-            ]
+                InlineKeyboardButton("🎵 Open TikTok", url="https://www.tiktok.com/"),
+                InlineKeyboardButton("📸 Open Instagram", url="https://www.instagram.com/"),
+            ],
+            [
+                InlineKeyboardButton("📘 Open Facebook", url="https://www.facebook.com/"),
+                InlineKeyboardButton("🔴 Open YouTube", url="https://www.youtube.com/"),
+            ],
         ])
 
-        await query.message.reply_text(copy_card, reply_markup=open_tt_kb, parse_mode="HTML")
+        await query.message.reply_text(copy_card, reply_markup=quick_links_kb, parse_mode="HTML")
         return
 
 
@@ -1193,50 +1264,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await _launch_job(chat_id, 10, edit_message=query.message)
         return
 
-    if data.startswith("clip_streamer:"):
-        streamer_id = data.split("clip_streamer:")[1]
-        roster_path = Path("config/streamer_roster.json")
-        target_url = None
-        s_name = "Streamer"
-        if roster_path.exists():
-            try:
-                rdata = json.loads(roster_path.read_text())
-                for s in rdata.get("streamers", []):
-                    if s.get("id") == streamer_id:
-                        target_url = s.get("url")
-                        s_name = s.get("name", "Streamer")
-                        break
-            except Exception:
-                pass
-        if not target_url:
-            await query.answer("Streamer link not found.", show_alert=True)
-            return
 
-        from pipeline.download import check_streamer_live_status
-        is_live, _, live_title = await check_streamer_live_status(target_url)
-
-        _last_submitted_url[chat_id] = target_url
-        _pending_links[chat_id] = {
-            "url": target_url,
-            "update": update,
-            "context": context,
-        }
-        session = _pending_links[chat_id]
-
-        status_str = f"🔴 **LIVE NOW:** _{live_title}_" if (is_live and live_title) else ("🔴 **LIVE NOW**" if is_live else "📁 **Offline** (Clipping recorded content)")
-
-        await _safe_edit_message_text(
-            query,
-            text=(
-                f"🔗 **Selected Streamer:** *{s_name}*\n"
-                f"• **Status:** {status_str}\n"
-                f"• **URL:** `{target_url}`\n\n"
-                f"📐 **Choose your canvas layout:**"
-            ),
-            reply_markup=_make_layout_keyboard(),
-            parse_mode="Markdown",
-        )
-        return
 
     if data.startswith("fmt:"):
         layout_mode = data.split("fmt:")[1]
@@ -1563,70 +1591,6 @@ async def handle_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     chat_id = update.effective_chat.id
     summary = scheduler.get_pending_summary(chat_id)
     await update.message.reply_text(summary, parse_mode="HTML")
-
-
-async def handle_streamers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Command /streamers — Displays the Top 20 Viral Streamer Roster Dashboard with live badges."""
-    if not update.effective_user or not _is_operator(update.effective_user.id):
-        await _handle_unapproved_user(update, context)
-        return
-
-    roster_path = Path("config/streamer_roster.json")
-    if not roster_path.exists():
-        await update.message.reply_text("⚠️ Streamer roster configuration file not found.")
-        return
-
-    try:
-        data = json.loads(roster_path.read_text())
-        streamers = data.get("streamers", [])
-    except Exception as exc:
-        await update.message.reply_text(f"⚠️ Error reading streamer roster: {exc}")
-        return
-
-    status_msg = await update.message.reply_text("📡 <b>Checking real-time live status for Top 20 creators...</b> ⏳", parse_mode="HTML")
-
-    from pipeline.download import check_streamer_live_status
-    live_tasks = [check_streamer_live_status(s.get("url", "")) for s in streamers]
-    live_results = await asyncio.gather(*live_tasks, return_exceptions=True)
-
-    text_lines = [
-        "👑 <b>VIRAL Streamer Roster (Top 20 Creators in Your Niche)</b>\n\n"
-        "🔴 = Live Now | ⚪ = Offline\n"
-        "Tap any streamer's name to view their channel, or tap a button to clip instantly:\n"
-    ]
-
-    keyboard = []
-    row = []
-
-    for i, (s, res) in enumerate(zip(streamers, live_results), start=1):
-        is_live, s_name, title = res if (isinstance(res, tuple) and len(res) == 3) else (False, s["name"], "")
-        plat = "🟣" if s.get("platform") == "Twitch" else ("🟩" if s.get("platform") == "Kick" else "▶️")
-        live_badge = "🔴 <b>LIVE NOW</b>" if is_live else "⚪ Offline"
-        btn_icon = "🔴" if is_live else plat
-        url = html.escape(s['url'])
-        name = html.escape(s['name'])
-        cat = html.escape(s.get('category', ''))
-
-        title_str = f" — <i>{html.escape(title[:30])}…</i>" if (is_live and title) else ""
-        text_lines.append(f"{i:02d}. {plat} <a href=\"{url}\"><b>{name}</b></a> ({s.get('platform')}) — {live_badge}{title_str}\n   • {cat}")
-
-        row.append(InlineKeyboardButton(f"{btn_icon} {s['name']}", callback_data=f"clip_streamer:{s['id']}"))
-        if len(row) == 2:
-            keyboard.append(row)
-            row = []
-
-    if row:
-        keyboard.append(row)
-
-    full_msg = "\n\n".join(text_lines)
-    full_msg += "\n\n💡 <i>Tap a button below to start clipping any streamer!</i>"
-
-    await status_msg.edit_text(
-        full_msg,
-        reply_markup=InlineKeyboardMarkup(keyboard[:10]),  # Top 10 as 1-tap buttons
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-    )
 
 
 

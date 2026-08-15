@@ -37,13 +37,15 @@ from pipeline.composite import composite_clips
 from pipeline.download import (
     extract_metadata,
     _get_cookie_opts,
+    _get_pot_opts,
+    _get_proxy_opts,
     download_video_clip_range,
     YT_CLIENT_CHAINS,
     _kick_vod_get_hls_url,
 )
 from pipeline.errors import PipelineError
 from pipeline.score import Moment, score_moments, _generate_fallback_moments, verify_and_clean_visual_moments
-from pipeline.text_utils import mask_profanity
+from pipeline.text_utils import mask_profanity, format_seo_title, generate_rich_hashtags
 from pipeline import get_public_base_url
 
 logger = logging.getLogger(__name__)
@@ -83,7 +85,13 @@ def _is_admin_chat(chat_id: int | str) -> bool:
     op_id = os.environ.get("TELEGRAM_OPERATOR_CHAT_ID", "").strip()
     if not op_id or op_id == "0":
         return True
-    return str(chat_id).strip() == op_id
+    if str(chat_id).strip() == op_id:
+        return True
+    try:
+        from bot.handlers import _is_operator
+        return _is_operator(int(chat_id))
+    except Exception:
+        return True
 
 
 async def _send_safe(bot, chat_id, text: str, parse_mode: str = "") -> None:
@@ -118,10 +126,10 @@ async def _check_audio_volume(audio_path: Path) -> float:
     return -20.0  # Default assume audible if detection fails
 
 
-async def _send_clip(bot, chat_id, clip_path: Path, caption: str, reply_markup=None) -> None:
+async def _send_clip(bot, chat_id, clip_path: Path, caption: str, reply_markup=None) -> bool:
     target = clip_path
-    if clip_path.exists() and clip_path.stat().st_size > 49 * 1024 * 1024:
-        logger.warning("Clip %s (%.1f MB) exceeds 50MB Telegram limit. Auto-compressing...",
+    if clip_path.exists() and clip_path.stat().st_size > 45 * 1024 * 1024:
+        logger.warning("Clip %s (%.1f MB) exceeds 45MB threshold. Auto-compressing...",
                        clip_path.name, clip_path.stat().st_size / (1024 * 1024))
         compressed = clip_path.parent / f"{clip_path.stem}_comp.mp4"
         try:
@@ -142,13 +150,16 @@ async def _send_clip(bot, chat_id, clip_path: Path, caption: str, reply_markup=N
             kwargs = {
                 "chat_id": chat_id, "video": fh, "caption": caption,
                 "parse_mode": "HTML", "supports_streaming": True,
+                "read_timeout": 180.0, "write_timeout": 180.0, "connect_timeout": 60.0,
             }
             if reply_markup:
                 kwargs["reply_markup"] = reply_markup
             await bot.send_video(**kwargs)
         logger.info("  Delivered: %s", target.name)
+        return True
     except Exception as exc:
         logger.warning("Failed to deliver %s: %s", target.name, exc)
+        return False
 
 
 class _ProgressTracker:
@@ -260,10 +271,11 @@ class _ProgressTracker:
                 clip_lines += f"  {emoji} <b>Clip #{clip_idx + 1:02d}</b> — {label}\n"
 
         # ── Current active phase label ────────────────────────────────────────────────
-        if self.delivered > 0 and self.delivered >= max(1, self.moments_found):
+        tot_target = self.target_clips if self.target_clips > 0 else self.moments_found
+        if self.delivered > 0 and self.delivered >= tot_target:
             phase = f"🎉 <b>Done!</b> {self.delivered} clip{'s' if self.delivered != 1 else ''} delivered!"
         elif self.delivered > 0:
-            phase = f"🚀 <b>Delivering</b> — {self.delivered}/{self.moments_found} clips sent {spin}"
+            phase = f"🚀 <b>Delivering</b> — {self.delivered}/{tot_target} clips sent {spin}"
         elif self.composited > 0:
             phase = f"🎨 <b>Compositing</b> — Rendering video clips... {spin}"
         elif self.moments_found > 0:
@@ -379,6 +391,8 @@ async def _get_hls_url(url: str) -> str:
     is_youtube = "youtu" in u_lower
     impersonate_opts = []
     cookie_opts = _get_cookie_opts()
+    pot_opts = _get_pot_opts() if is_youtube else []
+    proxy_opts = _get_proxy_opts() if is_youtube else []
     yt_client_chains = YT_CLIENT_CHAINS if is_youtube else [[]]
 
     last_exc = None
@@ -386,6 +400,9 @@ async def _get_hls_url(url: str) -> str:
         cmd = [
             "yt-dlp",
             "--no-playlist",
+            "--remote-components", "ejs:github",
+            *proxy_opts,
+            *pot_opts,
             *cookie_opts,
             *impersonate_opts,
             *yt_opts,
@@ -484,36 +501,73 @@ async def _get_stream_duration(hls_url: str, stream_url: str = "") -> float:
     return 3600.0
 
 
+def _get_ffmpeg_proxy_opts() -> list[str]:
+    """Return ffmpeg HTTP proxy arguments if YTDLP_PROXY is configured."""
+    proxy = os.environ.get("YTDLP_PROXY", "").strip()
+    if proxy:
+        return ["-http_proxy", proxy]
+    return []
+
+
 async def _download_full_audio(
     hls_url: str,
     start_sec: float,
     end_sec: float,
     output_path: Path,
+    stream_url: str | None = None,
 ) -> Path:
-    """
-    Download the full scan-range audio ONCE so windows can be sliced locally.
-    (The old approach re-ran ffmpeg output-seek per window, forcing HLS to
-    re-download every segment from the start of the DVR playlist each time.)
-    """
+    """Download the full scan-range audio ONCE in 16 parallel threads via yt-dlp."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     duration_sec = max(1.0, end_sec - start_sec)
+    
+    target_url = stream_url or hls_url
+    is_youtube = "youtu" in (target_url or "").lower()
+    cookie_opts = _get_cookie_opts()
+    pot_opts = _get_pot_opts() if is_youtube else []
+    proxy_opts = _get_proxy_opts() if is_youtube else []
+    ffmpeg_proxy = _get_ffmpeg_proxy_opts()
+    cmd_ytdlp = [
+        "yt-dlp",
+        "--no-check-certificates",
+        "--remote-components", "ejs:github",
+        *proxy_opts,
+        *pot_opts,
+        *cookie_opts,
+        "-N", "16",
+        "--concurrent-fragments", "16",
+        "-f", "ba[ext=m4a]/140/bestaudio/best",
+        "-vn",
+        "--force-overwrites",
+        "-o", str(output_path),
+        target_url,
+    ]
+    logger.info("Downloading full audio via 16-thread yt-dlp (%.0fs–%.0fs)...", start_sec, end_sec)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd_ytdlp,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size >= 4096:
+            logger.info("16-thread audio download complete: %s (%.1f MB)", output_path.name, output_path.stat().st_size / 1e6)
+            return output_path
+    except Exception as ytdlp_exc:
+        logger.warning("16-thread yt-dlp audio download failed (%s) — using FFmpeg fallback", ytdlp_exc)
+
     cmd = [
         "ffmpeg", "-y",
+        *ffmpeg_proxy,
         "-user_agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "-ss", str(start_sec),        # input seek — skips DVR segments instead of re-downloading from start
-        "-i", hls_url,                # HLS playlist URL
-        "-t", str(duration_sec),      # capture duration
-        "-vn",                        # audio only — no video track
+        "-ss", str(start_sec),
+        "-i", hls_url,
+        "-t", str(duration_sec),
+        "-vn",
         "-acodec", "aac",
-        "-b:a", "64k",                # low bitrate — speech optimization
+        "-b:a", "64k",
         "-f", "mp4",
         str(output_path),
     ]
-    logger.info(
-        "Downloading full scan-range audio once (%.0fs–%.0fs, %.0fs)...",
-        start_sec, end_sec, duration_sec,
-    )
-
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.DEVNULL,
@@ -577,8 +631,10 @@ async def _download_audio_window(
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    ffmpeg_proxy = _get_ffmpeg_proxy_opts()
     cmd = [
         "ffmpeg", "-y",
+        *ffmpeg_proxy,
         "-user_agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "-ss", str(start_sec),        # input seek — only fetches the needed HLS segments
         "-i", hls_url,                # HLS playlist URL
@@ -616,16 +672,59 @@ async def _download_hd_clip_from_hls(
     output_path: Path,
     stream_url: str = "",
 ) -> Path:
-    """
-    Download a specific clip range at high quality directly from the HLS stream.
-    """
+    """Download a specific clip range at high quality directly from the HLS stream using yt-dlp section download."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    duration = end_sec - start_sec
+    duration = max(1.0, end_sec - start_sec)
 
+    h = int(start_sec) // 3600
+    m = (int(start_sec) % 3600) // 60
+    s = int(start_sec) % 60
+    eh = int(end_sec) // 3600
+    em = (int(end_sec) % 3600) // 60
+    es = int(end_sec) % 60
+    section = f"*{h:02d}:{m:02d}:{s:02d}-{eh:02d}:{em:02d}:{es:02d}"
+
+    target_url = stream_url or hls_url
+    is_youtube = "youtu" in (target_url or "").lower()
+    cookie_opts = _get_cookie_opts()
+    pot_opts = _get_pot_opts() if is_youtube else []
+    proxy_opts = _get_proxy_opts() if is_youtube else []
+    cmd_ytdlp = [
+        "yt-dlp",
+        "--no-check-certificates",
+        "--remote-components", "ejs:github",
+        *proxy_opts,
+        *pot_opts,
+        *cookie_opts,
+        "-N", "16",
+        "--concurrent-fragments", "16",
+        "--download-sections", section,
+        "-f", "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=1080][vcodec^=avc]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/best",
+        "--merge-output-format", "mp4",
+        "--force-overwrites",
+        "-o", str(output_path),
+        target_url,
+    ]
+    logger.info("Downloading HD clip section %s → %s...", section, output_path.name)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd_ytdlp,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size >= 4096:
+            logger.info("yt-dlp HD clip section download complete: %s (%.1f MB)", output_path.name, output_path.stat().st_size / 1e6)
+            return output_path
+    except Exception as exc:
+        logger.warning("yt-dlp section download failed for %s (%s) — falling back to FFmpeg", output_path.name, exc)
+
+    ffmpeg_proxy = _get_ffmpeg_proxy_opts()
     cmd = [
         "ffmpeg", "-y",
+        *ffmpeg_proxy,
         "-user_agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "-ss", str(start_sec),        # input seek — skips DVR segments instead of re-downloading from start
+        "-ss", str(start_sec),
         "-i", hls_url,
         "-t", str(duration),
         "-c:v", "libx264",
@@ -636,12 +735,6 @@ async def _download_hd_clip_from_hls(
         "-bufsize", "16000k",
         str(output_path),
     ]
-
-    logger.info(
-        "HD clip seek: %.1fs–%.1fs → %s",
-        start_sec, end_sec, output_path.name,
-    )
-
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.DEVNULL,
@@ -654,6 +747,11 @@ async def _download_hd_clip_from_hls(
             f"{output_path.name}: {stderr.decode(errors='replace')[-400:]}",
         )
     return output_path
+
+
+def _format_yt_short_title(title: str, streamer: str) -> str:
+    """Format a clean, high-CTR, SEO-optimized YouTube Shorts title with 1-2 emojis (no slashes, 35-50 chars)."""
+    return format_seo_title(title, streamer=streamer, default_emoji="🔥")
 
 
 async def _scan_and_score_window(
@@ -670,6 +768,7 @@ async def _scan_and_score_window(
     video_title: str,
     tracker: "_ProgressTracker",
     full_audio: Path | None = None,
+    top_n: int = 3,
 ) -> dict:
     """
     Phase 1: Audio-scan window, transcribe with Deepgram, and score candidate moments.
@@ -740,17 +839,17 @@ async def _scan_and_score_window(
         moments = await score_moments(
             segments=segments,
             api_key=deepseek_api_key,
-            top_n=1,
+            top_n=top_n,
             model=deepseek_model,
             streamer=streamer,
             video_title=video_title,
         )
     except Exception as exc:
         logger.warning("%s — scoring failed (%s). Using speech density fallback.", label, exc)
-        moments = _generate_fallback_moments(segments, top_n=1, streamer=streamer)
+        moments = _generate_fallback_moments(segments, top_n=top_n, streamer=streamer)
 
     if not moments:
-        moments = _generate_fallback_moments(segments, top_n=1, streamer=streamer)
+        moments = _generate_fallback_moments(segments, top_n=top_n, streamer=streamer)
 
     # ── 3.5 Visual Overlay & Subscribe-Button Avoidance Scan ────────────────────
     moments = verify_and_clean_visual_moments(moments, video_path=audio_path)
@@ -872,7 +971,7 @@ async def run_streaming_pipeline(
     # input-seek (only the needed HLS segments are pulled) — avoids the multi-hour
     # linear audio download that makes long VODs feel slow.
     scan_span_sec = max(0.0, stream_end_sec - stream_start_sec)
-    use_full_audio = is_live_now or scan_span_sec <= 900.0
+    use_full_audio = True
     full_audio = run_dir / "full_audio.m4a"
     if use_full_audio:
         try:
@@ -881,6 +980,7 @@ async def run_streaming_pipeline(
                 start_sec=stream_start_sec,
                 end_sec=stream_end_sec,
                 output_path=full_audio,
+                stream_url=url,
             )
             logger.info("Full scan-range audio ready: %s (%.1f MB)", full_audio.name, full_audio.stat().st_size / 1e6)
         except Exception as full_exc:
@@ -893,6 +993,7 @@ async def run_streaming_pipeline(
         )
 
     # ── Phase 1: Parallel Audio Scan & AI Moment Extraction ────────────────────
+    top_n_per_window = max(2, (target_total_clips + total - 1) // max(1, total) + 2)
     scan_tasks = [
         _scan_and_score_window(
             hls_url=hls_url,
@@ -907,6 +1008,7 @@ async def run_streaming_pipeline(
             video_title=video_title,
             tracker=tracker,
             full_audio=full_audio,
+            top_n=top_n_per_window,
         )
         for i, w_start in enumerate(windows)
     ]
@@ -984,14 +1086,27 @@ async def run_streaming_pipeline(
             clip_num = m.index + 1
             mins = int(m.start // 60)
             secs = int(m.start % 60)
-            caption_title = mask_profanity(" / ".join(m.caption_lines)) if m.caption_lines else f"Clip {clip_num}"
-            emoji = getattr(m, "emoji", "🔥")
+            emoji = getattr(m, "emoji", "🔥😂💀")
             clean_streamer = streamer if streamer else "Streamer"
-            tag = "#" + re.sub(r"[^\w]", "", clean_streamer)
+            score = getattr(m, "score", 95)
+            tier = "S-Tier" if score >= 90 else ("A-Tier" if score >= 80 else "B-Tier")
+            reasoning = getattr(m, "reasoning", "High viral potential.")
+
+            raw_yt = getattr(m, "title", "") or getattr(m, "caption_lines", None)
+            seo_title = format_seo_title(raw_yt, clean_streamer, default_emoji=emoji)
+
+            raw_hashtags = getattr(m, "hashtags", "").strip()
+            rich_tags = generate_rich_hashtags(streamer=clean_streamer, topic=seo_title, aura_word=getattr(m, "aura_word", ""), existing_hashtags=raw_hashtags)
+
+            caption_body = " ".join(m.caption_lines) if m.caption_lines else seo_title
+            caption_body = mask_profanity(caption_body)
+            social_body = f"{caption_body} {emoji}\n\n{rich_tags}"
 
             video_caption = (
-                f"🎬 <b>Clip {clip_num:02d}</b> • {clean_streamer} [{mins}m{secs:02d}s]\n"
-                f"<i>{html.escape(caption_title)} {emoji}</i>"
+                f"🎬 <b>Clip {clip_num:02d}</b> • <b>{html.escape(clean_streamer)}</b> [{mins}m{secs:02d}s] ⚡ <i>Score: {score}/100 ({tier})</i>\n"
+                f"💡 <i>{html.escape(reasoning)}</i>\n\n"
+                f"🔴 <b>YouTube Title:</b>\n<code>{html.escape(seo_title)}</code>\n\n"
+                f"📱 <b>Caption &amp; Hashtags:</b>\n<code>{html.escape(social_body)}</code>"
             )
             # Generate HD Cover Thumbnail capturing Aura Word (*FAIL*, *COOKED*) @ t=1.8s
             try:
@@ -1021,33 +1136,33 @@ async def run_streaming_pipeline(
                         InlineKeyboardButton("📘 Facebook", callback_data=f"post:facebook:{clip_num}"),
                     ],
                     [
+                        InlineKeyboardButton("📋 Copy Caption & Hashtags", callback_data=f"pub:mobile:{clip_num}"),
+                    ],
+                    [
                         InlineKeyboardButton("🗑️ Discard Clip", callback_data=f"discard:{clip_num}"),
                     ],
                 ])
             else:
                 action_keyboard = None
-            await _send_clip(bot, chat_id, final_path, video_caption, reply_markup=action_keyboard)
+            # Save 9:16 composited video to public clips directory for web serving & social posting
+            try:
+                clips_public_dir = Path("tmp/clips")
+                clips_public_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(final_path, clips_public_dir / f"clip_{clip_num:03d}.mp4")
+                logger.info("  Copied 9:16 composited vertical video to tmp/clips/clip_%03d.mp4", clip_num)
+            except Exception as copy_exc:
+                logger.warning("Could not copy final 9:16 clip to public dir: %s", copy_exc)
 
-            raw_yt = getattr(m, "title", caption_title)
-            yt_title = html.escape(mask_profanity(raw_yt)) + f" {emoji} {tag} #Shorts #Viral"
-            tt_title = html.escape(caption_title) + f" {emoji} {tag} #viral #fyp #streamer #highlights"
-            ig_title = html.escape(caption_title) + f" {emoji} {tag} #reels #viral #explorepage #trending"
-            fb_title = html.escape(caption_title) + f" {emoji} {tag} #facebookreels #viral #facebook"
+            sent_ok = await _send_clip(bot, chat_id, final_path, video_caption, reply_markup=action_keyboard)
 
-            if not _is_admin_chat(chat_id):
-                card_text = (
-                    f"📌 <b>Clip {clip_num:02d} Tap-To-Copy Metadata</b>\n\n"
-                    f"🔴 <b>YouTube Shorts Title:</b>\n<code>{yt_title}</code>\n\n"
-                    f"🎵 <b>TikTok Caption:</b>\n<code>{tt_title}</code>\n\n"
-                    f"📸 <b>Instagram Reels Caption:</b>\n<code>{ig_title}</code>\n\n"
-                    f"📘 <b>Facebook Reels Caption:</b>\n<code>{fb_title}</code>"
-                )
-                await _send_safe(bot, chat_id, card_text, parse_mode="HTML")
-
-            delivered_count[0] += 1
-            tracker.delivered += 1
-            tracker.composited += 1
-            tracker.set_clip_state(m.index, "done")
+            if sent_ok:
+                delivered_count[0] += 1
+                tracker.delivered += 1
+                tracker.composited += 1
+                tracker.set_clip_state(m.index, "done")
+            else:
+                tracker.set_clip_state(m.index, "failed")
+                logger.warning("Clip #%02d delivery failed to chat %s", clip_num, chat_id)
 
         await composite_clips(
             clips=[clip_out], captions=captions, watermark_path=watermark_path,
@@ -1074,23 +1189,23 @@ async def run_streaming_pipeline(
         clips_public_dir.mkdir(parents=True, exist_ok=True)
         session_clips = []
         for idx, (m, wdir, segs) in enumerate(final_moments_to_render, start=1):
-            clip_path = wdir / f"clip_{m.index:03d}.mp4"
+            clip_path = wdir / "finals" / f"final_{m.index:02d}.mp4"
             if not clip_path.exists():
-                clip_path = wdir / "finals" / f"final_00.mp4"
+                clip_path = wdir / "finals" / "final_00.mp4"
+            if not clip_path.exists():
+                clip_path = wdir / f"clip_{m.index:03d}.mp4"
             if not clip_path.exists():
                 continue
 
-            safe_fid = "".join(c for c in clip_path.name if c.isalnum())[:20]
-            public_filename = f"clip_{safe_fid}.mp4"
+            public_filename = f"clip_{idx:03d}.mp4"
             public_path = clips_public_dir / public_filename
             try:
-                if not public_path.exists():
-                    shutil.copy2(clip_path, public_path)
+                shutil.copy2(clip_path, public_path)
                 video_url = f"{get_public_base_url()}/clips/{public_filename}"
             except Exception:
                 video_url = ""
 
-            raw_title = getattr(m, "title", "") or getattr(m, "caption_lines", [""])[0]
+            raw_title = format_seo_title(getattr(m, "title", "") or getattr(m, "caption_lines", [""]), streamer)
             hashtags = getattr(m, "hashtags", "") or ""
             payload_base = {
                 "clip_id": f"clip_{idx:03d}",

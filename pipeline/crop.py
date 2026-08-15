@@ -116,7 +116,6 @@ async def detect_crop_offset(clip_path: Path) -> str:
         None, _detect_dynamic_crop_sync, clip_path
     )
 
-
 def _detect_dynamic_crop_sync(clip_path: Path) -> str:
     cap = cv2.VideoCapture(str(clip_path))
     if not cap.isOpened():
@@ -142,7 +141,7 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
 
     seats = [] # list of dicts: {"center_x": int, "frames": {frame_idx: metric}}
 
-    face_cascade_path = str(Path(__file__).parent.parent / "assets" / "haarcascade_frontalface_default.xml")
+    face_cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     face_cascade = cv2.CascadeClassifier(face_cascade_path) if Path(face_cascade_path).exists() else None
 
     if HAS_MEDIAPIPE:
@@ -226,7 +225,13 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
 
     if not seats:
         logger.warning("No faces detected in %s, falling back to static center crop.", clip_path.name)
-        return f"crop=ih*9/16:ih:{default_x}:0,scale=1080:1920"
+        return f"crop=w=ih*9/16:h=ih:x={default_x}:y=0,scale=1080:1920"
+
+    # If only 1 face detected across the clip, center on it stably
+    if len(seats) == 1:
+        fx = max(0, min(seats[0]["center_x"] - crop_w // 2, width - crop_w))
+        logger.info("Single face detected in %s: Centering stable crop at x=%d", clip_path.name, fx)
+        return f"crop=w=ih*9/16:h=ih:x={fx}:y=0,scale=1080:1920"
 
     # Active Speaker Detection (ASD) via Rolling Window Face Size Variance
     # Window size: 1.5 seconds
@@ -241,15 +246,12 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
         max_activity = -1.0
         
         for idx, s in enumerate(seats):
-            # Extract MAR values in this time window
             sorted_frames = sorted([f for f in s["frames"].keys() if start_frame <= f < end_frame])
-            
-            # Calculate total mouth movement (sum of absolute differences)
             activity = 0.0
             for i in range(1, len(sorted_frames)):
                 activity += abs(s["frames"][sorted_frames[i]] - s["frames"][sorted_frames[i-1]])
                 
-            # Hysteresis: give a 20% boost to the currently active speaker to prevent rapid flickering camera cuts
+            # Hysteresis: give a 20% boost to current speaker to prevent flickering cuts
             if current_active_seat == idx:
                 activity *= 1.2
                 
@@ -260,14 +262,13 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
         if best_seat is not None and max_activity > 0:
             current_active_seat = best_seat
             
-        # If no activity (silence), hold the last known active seat
         if current_active_seat is not None:
             sec = start_frame / fps
             target_x = max(0, min(seats[current_active_seat]["center_x"] - crop_w // 2, width - crop_w))
             points.append((sec, target_x))
 
     if not points:
-        return f"crop=ih*9/16:ih:{default_x}:0,scale=1080:1920"
+        return f"crop=w=ih*9/16:h=ih:x={default_x}:y=0,scale=1080:1920"
 
     # Simplify points: only generate a cut when the active speaker actually changes
     simplified_points = []
@@ -281,22 +282,27 @@ def _detect_dynamic_crop_sync(clip_path: Path) -> str:
     duration = total_frames / fps if fps > 0 else 0
     simplified_points.append((duration, simplified_points[-1][1]))
     
-    # Generate TV-style FFmpeg Jump-Cut Camera Expressions!
-    # We use a flat sum of boolean evaluations to prevent FFmpeg OOM parsing deeply nested IF statements
+    if len(simplified_points) <= 2:
+        fx = simplified_points[0][1]
+        return f"crop=w=ih*9/16:h=ih:x={fx}:y=0,scale=1080:1920"
+
+    # Generate TV-style FFmpeg Jump-Cut Camera Expressions with properly escaped commas
     expr_parts = []
     for i in range(len(simplified_points) - 1):
         t0, x0 = simplified_points[i]
         t1, x1 = simplified_points[i+1]
-        expr_parts.append(f"{x0}*between(t,{t0:.3f},{t1:.3f})")
+        expr_parts.append(f"{x0}*between(t\,{t0:.3f}\,{t1:.3f})")
     
-    # Handle time after the last point
     last_t, last_x = simplified_points[-1]
-    expr_parts.append(f"{last_x}*gte(t,{last_t:.3f})")
+    expr_parts.append(f"{last_x}*gte(t\,{last_t:.3f})")
 
     expr_str = "+".join(expr_parts)
 
     logger.info("Face tracking for %s: Generated %d dynamic camera jump-cuts!", clip_path.name, len(simplified_points)-1)
-    return f"crop=ih*9/16:ih:'{expr_str}':0,scale=1080:1920"
+    return f"crop=w=ih*9/16:h=ih:x=max(0\,min(iw-ow\,{expr_str})):y=0,scale=1080:1920"
+
+
+generate_dynamic_face_tracking_filter = _detect_dynamic_crop_sync
 
 
 def verify_visual_hook_alignment(video_path: Path | str, start_ts: float) -> float:

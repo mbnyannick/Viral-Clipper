@@ -42,3 +42,4 @@ assets/fonts/NotoColorEmoji.ttf
 *_blueprint.json
 fix_n8n.py
 build_clean_n8n.py
+.aider*

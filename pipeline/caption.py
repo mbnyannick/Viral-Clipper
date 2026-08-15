@@ -22,18 +22,18 @@ logger = logging.getLogger(__name__)
 CANVAS_W: int = 1080
 CANVAS_H: int = 1920
 
-MAIN_FONT_SIZE = 38
-SECONDARY_FONT_SIZE = 32
-LINE_GAP = 8
+MAIN_FONT_SIZE = 46
+SECONDARY_FONT_SIZE = 42
+LINE_GAP = 12
 MAX_LINES = 2
 TEXT_COLOR = (20, 20, 20, 255)
 BOX_COLOR = (255, 255, 255, 255)
-BOX_RADIUS = 16
-BOX_PAD_X = 22
-BOX_PAD_Y = 14
+BOX_RADIUS = 28
+BOX_PAD_X = 36
+BOX_PAD_Y = 24
 SHADOW_COLOR = (0, 0, 0, 115)
-EMOJI_SIZE = 38
-WORD_SPACING = 8
+EMOJI_SIZE = 44
+WORD_SPACING = 10
 
 _SYSTEM_EMOJI_PATHS = [
     "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
@@ -219,7 +219,7 @@ def _draw_white_card(img: Image.Image, lines: list[str], emoji_str: str | None, 
     
     # 40px overlap into top edge of 1:1 main video frame (TikTok / Reels reference positioning)
     CAPTION_OVERLAP = 40
-    video_top_y = 280
+    video_top_y = 420
     box_y = max(15, video_top_y - box_height + CAPTION_OVERLAP)
 
     shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))

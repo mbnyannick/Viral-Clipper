@@ -1,24 +1,96 @@
 {
   "streamers": [
-    {"id": "kai_cenat", "name": "Kai Cenat", "platform": "Twitch", "url": "https://www.twitch.tv/kaicenat", "category": "Huge guest events, comedy, high-energy stream lore"},
-    {"id": "n3on", "name": "N3on", "platform": "Kick", "url": "https://kick.com/n3on", "category": "Constant IRL drama, phone call confrontations, guest interactions"},
-    {"id": "ray", "name": "Ray", "platform": "Twitch", "url": "https://www.twitch.tv/rayasianboy", "category": "High-energy reactions, hilarious interactions"},
-    {"id": "ishowspeed", "name": "IShowSpeed", "platform": "YouTube", "url": "https://www.youtube.com/@IShowSpeed", "category": "Wild viral stunts, international streams, intense reactions"},
-    {"id": "duke_dennis", "name": "Duke Dennis", "platform": "Twitch", "url": "https://www.twitch.tv/dukedennis", "category": "Constant IRL interactions, AMP group comedy, high aura moments"},
-    {"id": "fanum", "name": "Fanum", "platform": "Twitch", "url": "https://www.twitch.tv/fanum", "category": "Fanum Tax lore, group stream banter, constant human interaction"},
-    {"id": "jynxzi", "name": "Jynxzi", "platform": "Twitch", "url": "https://www.twitch.tv/jynxzi", "category": "Massive 1v1 guest banter, e-date streams, intense reactions"},
-    {"id": "agent00", "name": "Agent00", "platform": "Twitch", "url": "https://www.twitch.tv/agent00", "category": "AMP group banter, storytelling, guest stream debates"},
-    {"id": "plaqueboymax", "name": "PlaqueBoyMax", "platform": "Twitch", "url": "https://www.twitch.tv/plaqueboymax", "category": "IRL 5v5 banter, stream call-ins, high-energy reactions"},
-    {"id": "silky", "name": "Silky", "platform": "Twitch", "url": "https://www.twitch.tv/silky", "category": "IRL stream drama, group interactions, hilarious commentary"},
-    {"id": "brucedropemoff", "name": "BruceDropEmOff", "platform": "Kick", "url": "https://kick.com/brucedropemoff", "category": "Unfiltered commentary, guest roast sessions, intense banter"},
-    {"id": "sketch", "name": "Sketch", "platform": "Twitch", "url": "https://www.twitch.tv/thesketchreal", "category": "Viral catchphrases, guest collaborations, hilarious stream moments"},
-    {"id": "lacy", "name": "Lacy", "platform": "Twitch", "url": "https://www.twitch.tv/lacy", "category": "FaZe house drama, IRL challenges, group streamer banter"},
-    {"id": "ronnie", "name": "Ronnie", "platform": "Twitch", "url": "https://www.twitch.tv/ronnie", "category": "FaZe house interactions, IRL challenges, comedy banter"},
-    {"id": "extraemily", "name": "ExtraEmily", "platform": "Twitch", "url": "https://www.twitch.tv/extraemily", "category": "Wild IRL public stunts, high-energy interaction streams"},
-    {"id": "xqc", "name": "xQc", "platform": "Kick", "url": "https://kick.com/xqc", "category": "Heated debates, stream call-ins, rapid-fire commentary"},
-    {"id": "clix", "name": "Clix", "platform": "Twitch", "url": "https://www.twitch.tv/clix", "category": "Streamer collaborations, intense reactions, wager banter"},
-    {"id": "tarik", "name": "Tarik", "platform": "Twitch", "url": "https://www.twitch.tv/tarik", "category": "Co-streaming reactions, guest watch parties"},
-    {"id": "hasanabi", "name": "HasanAbi", "platform": "Twitch", "url": "https://www.twitch.tv/hasanabi", "category": "Reacts, debate call-ins, viral commentary"},
-    {"id": "pokimane", "name": "Pokimane", "platform": "Twitch", "url": "https://www.twitch.tv/pokimane", "category": "Podcast interviews, guest stream collaborations"}
+    {
+      "id": "kai_cenat",
+      "name": "Kai Cenat",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/kaicenat",
+      "category": "Huge guest events, comedy, high-energy stream lore"
+    },
+    {
+      "id": "n3on",
+      "name": "N3on",
+      "platform": "Kick",
+      "url": "https://kick.com/n3on",
+      "category": "Constant IRL drama, phone call confrontations, guest interactions"
+    },
+    {
+      "id": "ray",
+      "name": "Ray",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/rayasianboy",
+      "category": "High-energy reactions, hilarious interactions"
+    },
+    {
+      "id": "ishowspeed",
+      "name": "IShowSpeed",
+      "platform": "YouTube",
+      "url": "https://www.youtube.com/@IShowSpeed",
+      "category": "Wild viral stunts, international streams, intense reactions"
+    },
+    {
+      "id": "duke_dennis",
+      "name": "Duke Dennis",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/duke",
+      "category": "Constant IRL interactions, AMP group comedy, high aura moments"
+    },
+    {
+      "id": "fanum",
+      "name": "Fanum",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/fanum",
+      "category": "Fanum Tax lore, group stream banter, constant human interaction"
+    },
+    {
+      "id": "jynxzi",
+      "name": "Jynxzi",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/jynxzi",
+      "category": "Massive 1v1 guest banter, e-date streams, intense reactions"
+    },
+    {
+      "id": "agent00",
+      "name": "Agent00",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/agent00",
+      "category": "AMP group banter, storytelling, guest stream debates"
+    },
+    {
+      "id": "plaqueboymax",
+      "name": "PlaqueBoyMax",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/plaqueboymax",
+      "category": "IRL 5v5 banter, stream call-ins, high-energy reactions"
+    },
+    {
+      "id": "silky",
+      "name": "Silky",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/silky",
+      "category": "IRL stream drama, group interactions, hilarious commentary"
+    },
+    {
+      "id": "sketch",
+      "name": "Sketch",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/thesketchreal/videos",
+      "category": "Viral catchphrases, guest collaborations, hilarious stream moments"
+    },
+    {
+      "id": "lacy",
+      "name": "Lacy",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/lacy",
+      "category": "FaZe house drama, IRL challenges, group streamer banter"
+    },
+    {
+      "id": "rakai",
+      "name": "Rakai",
+      "platform": "Twitch",
+      "url": "https://www.twitch.tv/2xrakai",
+      "category": "High-energy gameplay, collaborations, stream interactions"
+    }
   ]
 }
+

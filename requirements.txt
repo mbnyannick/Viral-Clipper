@@ -8,6 +8,7 @@ google-auth-oauthlib>=1.2.0
 
 # Video / audio & Kick/Cloudflare Impersonation
 yt-dlp>=2024.1.1
+bgutil-ytdlp-pot-provider>=1.3.1
 curl_cffi>=0.7.0        # Required for Kick.com Cloudflare TLS impersonation
 opencv-python-headless>=4.8.0
 mediapipe==0.10.14    # 0.10.x = last series with mp.solutions API; 1.0.0 removed it

@@ -59,7 +59,7 @@ def test_render_caption_produces_correct_dimensions(assets_dir, tmp_path):
     assert height > 0
 
     img = Image.open(out)
-    assert img.width == 720
+    assert img.width == 1080
     assert img.height == height
 
 
@@ -157,6 +157,6 @@ def test_render_caption_face_crop(assets_dir, tmp_path):
     assert height > 0
 
     img = Image.open(out)
-    assert img.width == 720
+    assert img.width == 1080
     assert img.height == height
 

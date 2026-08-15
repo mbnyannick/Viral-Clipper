@@ -134,11 +134,14 @@ async def _transcribe_groq_one(
                 seg_words = []
                 s_words = seg.get("words") or words
                 for w in (s_words or []):
+                    if not isinstance(w, dict):
+                        continue
                     w_start = round(w.get("start", 0.0) + offset, 3)
                     w_end = round(w.get("end", 0.0) + offset, 3)
-                    if seg_start - 0.5 <= w_start <= seg_end + 0.5:
+                    w_txt = (w.get("word") or w.get("text") or "").strip()
+                    if seg_start - 0.5 <= w_start <= seg_end + 0.5 and w_txt:
                         seg_words.append({
-                            "word": w.get("word", "").strip(),
+                            "word": w_txt,
                             "start": w_start,
                             "end": w_end,
                             "confidence": 0.95,

@@ -9,7 +9,13 @@ and starts polling.
 import logging
 import logging.handlers
 import os
+import sys
 from pathlib import Path
+
+# Ensure root workspace directory is in sys.path
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 import shutil
 import time
@@ -93,7 +99,6 @@ def main() -> None:
         handle_schedule,
         handle_start,
         handle_stop,
-        handle_streamers,
         handle_update,
         handle_users,
     )
@@ -102,12 +107,18 @@ def main() -> None:
     from telegram.request import HTTPXRequest
 
     request = HTTPXRequest(
+        http_version="1.1",
         read_timeout=60.0,
         write_timeout=60.0,
         connect_timeout=30.0,
         pool_timeout=30.0,
+        connection_pool_size=8,
     )
-    app = Application.builder().token(token).request(request).build()
+    base_url = os.environ.get("TELEGRAM_BASE_URL", "").strip()
+    builder = Application.builder().token(token).request(request)
+    if base_url:
+        builder.base_url(base_url)
+    app = builder.build()
 
     # Register interactive commands
     app.add_handler(CommandHandler("help", handle_help))
@@ -123,7 +134,6 @@ def main() -> None:
     app.add_handler(CommandHandler("users", handle_users))
     app.add_handler(CommandHandler("revoke", handle_revoke))
     app.add_handler(CommandHandler("schedule", handle_schedule))
-    app.add_handler(CommandHandler("streamers", handle_streamers))
 
     async def _post_init(application) -> None:
         import asyncio
@@ -134,7 +144,6 @@ def main() -> None:
             cmd_list = [
                 BotCommand("start", "🚀 Start bot & view status"),
                 BotCommand("help", "📖 View usage guide & features"),
-                BotCommand("streamers", "👑 Top 20 Viral Streamers Dashboard"),
                 BotCommand("schedule", "📅 View peak-hour schedule & quotas"),
                 BotCommand("brief", "🔴 Set custom AI campaign rules"),
                 BotCommand("status", "⚙️ Check live job progress"),

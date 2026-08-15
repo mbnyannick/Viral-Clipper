@@ -398,6 +398,30 @@ def _get_cookie_opts() -> list[str]:
     return []
 
 
+def _get_pot_opts() -> list[str]:
+    """Return yt-dlp extractor args to connect to the bgutil PO Token provider service."""
+    import os
+    pot_base = os.environ.get("YTDLP_POT_BASE_URL", "http://172.17.0.1:4416").strip()
+    if pot_base:
+        return [
+            "--extractor-args", f"youtubepot-bgutilhttp:base_url={pot_base}",
+            "--extractor-args", "youtube:player_client=ios,android",
+        ]
+    return ["--extractor-args", "youtube:player_client=ios,android"]
+
+
+def _get_proxy_opts() -> list[str]:
+    """Return yt-dlp and ffmpeg proxy options if YTDLP_PROXY is configured."""
+    import os
+    proxy = os.environ.get("YTDLP_PROXY", "").strip()
+    if proxy:
+        return [
+            "--proxy", proxy,
+            "--downloader-args", f"ffmpeg:-http_proxy {proxy}",
+        ]
+    return []
+
+
 def detect_platform_and_type(url: str, is_live_flag: str = "") -> tuple[str, str, str]:
     """
     Detect Platform (YouTube/Kick/Twitch), Content Type, and Live Status.
@@ -447,12 +471,17 @@ def detect_platform_and_type(url: str, is_live_flag: str = "") -> tuple[str, str
     return platform, content_type, live_status
 
 
+# Cookie-less trusted mobile/embedded clients FIRST — YouTube's bot detection
+# is relaxed for these, and not attaching a logged-in session to datacenter
+# traffic protects the fresh VM IP from being re-flagged.
+# Cookie-using clients (web/tv/mweb) come later as fallback.
 YT_CLIENT_CHAINS = [
+    ["--extractor-args", "youtube:player_client=android_vr"],
+    ["--extractor-args", "youtube:player_client=ios"],
+    ["--extractor-args", "youtube:player_client=tv_embedded,android_vr"],
+    ["--extractor-args", "youtube:player_client=android"],
     [],  # Default web client (required for cookies.txt authentication)
     ["--extractor-args", "youtube:player_client=web"],
-    ["--extractor-args", "youtube:player_client=tvhtml5,web"],
-    ["--extractor-args", "youtube:player_client=tv"],
-    ["--extractor-args", "youtube:player_client=android"],
     ["--extractor-args", "youtube:player_client=mweb"],
 ]
 
@@ -525,7 +554,7 @@ async def extract_metadata(url: str) -> dict[str, str]:
 
     yt_client_chains = YT_CLIENT_CHAINS if is_youtube else [[]]
 
-    cookie_opts = _get_cookie_opts()
+    cookie_opts_full = _get_cookie_opts()
 
     last_exc = None
     attempt = 0
@@ -533,6 +562,14 @@ async def extract_metadata(url: str) -> dict[str, str]:
         for yt_opts in yt_client_chains:
             if attempt > 0:
                 await asyncio.sleep(YT_RETRY_SLEEP_SEC)
+            # Only attach cookies for the a posteriori clients ([], web, mweb).
+            # Trusted mobile/embedded clients (android_vr/ios/tv_embedded/android) MUST
+            # go cookie-less — attaching a session to datacenter traffic is what
+            # gets sessions rotated and the egress IP flagged.
+            is_cookie_client = yt_opts == [] or "player_client=web" in " ".join(yt_opts) or "player_client=mweb" in " ".join(yt_opts) or "player_client=tvhtml5" in " ".join(yt_opts)
+            cookie_opts = cookie_opts_full if is_cookie_client else []
+            pot_opts = _get_pot_opts() if is_youtube else []
+            proxy_opts = _get_proxy_opts() if is_youtube else []
             attempt += 1
             try:
                 raw = await _run(
@@ -541,6 +578,8 @@ async def extract_metadata(url: str) -> dict[str, str]:
                         "--no-check-certificates",
                         "--no-playlist",
                         "--remote-components", "ejs:github",
+                        *proxy_opts,
+                        *pot_opts,
                         *cookie_opts,
                         *yt_opts,
                         "--print", "%(uploader)s|%(channel)s|%(title)s|%(duration)s|%(is_live)s",
@@ -690,7 +729,7 @@ async def download(url: str, output_dir: Path, streamer_info: dict | None = None
 
     yt_client_chains = YT_CLIENT_CHAINS if is_youtube else [[]]
 
-    cookie_opts = _get_cookie_opts()
+    cookie_opts_full = _get_cookie_opts()
     # For active ongoing live streams (Kick and Twitch), cap download duration to 1 hour (3600s)
     live_downloader_opts = ["--downloader", "ffmpeg", "--downloader-args", "ffmpeg:-t 3600"] if (is_live and (is_kick or is_twitch)) else []
     speed_opts = ["-N", "8", "--concurrent-fragments", "8"] if not (is_live and is_twitch) else []
@@ -709,14 +748,25 @@ async def download(url: str, output_dir: Path, streamer_info: dict | None = None
 
     for target_url in urls_to_download:
         for yt_opts in yt_client_chains:
+            # Same rule as extract_metadata: mobile/embedded clients go cookie-less,
+            # only web-family clients get session cookies (they require them anyway,
+            # and attaching sessions to mobile clients from a datacenter IP is what
+            # got the previous IP flagged).
+            is_cookie_client = yt_opts == [] or "player_client=web" in " ".join(yt_opts) or "player_client=mweb" in " ".join(yt_opts) or "player_client=tvhtml5" in " ".join(yt_opts)
+            # Only YouTube+web-family clients carry session cookies; YouTube
+            # mobile/embedded go cookie-less; non-YouTube platforms keep their
+            # cookies (harmless, e.g. for auth-required content).
+            cookie_opts = cookie_opts_full if (not is_youtube or is_cookie_client) else []
+            pot_opts = _get_pot_opts() if is_youtube else []
+            proxy_opts = _get_proxy_opts() if is_youtube else []
             for cmd_opts in [
-                [*cookie_opts, *yt_opts, *speed_opts, *live_downloader_opts, *section_opts],
-                [*cookie_opts, *speed_opts, *live_downloader_opts, *section_opts],
+                [*proxy_opts, *pot_opts, *cookie_opts, *yt_opts, *speed_opts, *live_downloader_opts, *section_opts],
+                [*proxy_opts, *pot_opts, *cookie_opts, *speed_opts, *live_downloader_opts, *section_opts],
             ]:
                 cmd = [
                     "yt-dlp",
                     "--no-check-certificates",
-                    "-f", "bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height>=1080]+bestaudio/best[height>=1080]/best",
+                    "-f", "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=1080][vcodec^=avc]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
                     "--merge-output-format", "mp4",
                     "--no-playlist",
                     "--remote-components", "ejs:github",
@@ -780,6 +830,24 @@ async def download_audio_chunk(
     u_lower = url.lower()
     is_youtube = "youtu" in u_lower
     is_kick = "kick.com" in u_lower
+
+    if is_kick:
+        try:
+            hls_url, _, _, _ = await _kick_vod_get_hls_url(url)
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start_sec),
+                "-i", hls_url,
+                "-t", str(duration_sec),
+                "-vn",
+                "-acodec", "aac",
+                str(output_path),
+            ]
+            await _run(cmd, step="audio_chunk_download")
+            return output_path
+        except Exception as kick_exc:
+            logger.warning("Kick direct HLS audio chunk download failed for %s: %s — falling back to yt-dlp", url, kick_exc)
+
     cookie_opts = _get_cookie_opts()
     yt_client_chains = YT_CLIENT_CHAINS if is_youtube else [[]]
 
@@ -854,6 +922,28 @@ async def download_video_clip_range(
     u_lower = url.lower()
     is_youtube = "youtu" in u_lower
     is_kick = "kick.com" in u_lower
+
+    if is_kick:
+        try:
+            hls_url, _, _, _ = await _kick_vod_get_hls_url(url)
+            dur = end_sec - start_sec
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start_sec),
+                "-i", hls_url,
+                "-t", str(dur),
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "23",
+                "-c:a", "aac",
+                "-avoid_negative_ts", "make_zero",
+                str(output_path),
+            ]
+            await _run(cmd, step="clip_download")
+            return output_path
+        except Exception as kick_exc:
+            logger.warning("Kick direct HLS clip download failed for %s: %s — falling back to yt-dlp", url, kick_exc)
+
     cookie_opts = _get_cookie_opts()
     yt_client_chains = YT_CLIENT_CHAINS if is_youtube else [[]]
 

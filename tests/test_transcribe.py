@@ -17,13 +17,12 @@ from pipeline.errors import PipelineError
 
 
 def _make_seg(text: str, start: float, end: float) -> dict:
-    """Deepgram returns transcript instead of text."""
-    return {"transcript": text, "start": start, "end": end}
+    return {"text": text, "start": start, "end": end}
 
 
 def _make_httpx_response(segments: list[dict]) -> MagicMock:
     resp = MagicMock()
-    resp.json.return_value = {"results": {"utterances": segments}}
+    resp.json.return_value = {"segments": segments, "words": []}
     return resp
 
 
@@ -34,19 +33,19 @@ async def test_transcribe_offsets_timestamps(tmp_path):
     chunk0.write_bytes(b"fake")
     chunk1.write_bytes(b"fake")
 
-    resp0 = _make_httpx_response([
-        _make_seg("hello world", 0.5, 2.0),
-        _make_seg("how are you", 2.1, 4.0),
-    ])
-    resp1 = _make_httpx_response([
-        _make_seg("and then he said", 1.0, 3.5),
-    ])
+    async def mock_groq_one(client, api_key, path, offset, max_retries=2):
+        if path == chunk0:
+            return [
+                {"text": "hello world", "start": 0.5 + offset, "end": 2.0 + offset, "words": []},
+                {"text": "how are you", "start": 2.1 + offset, "end": 4.0 + offset, "words": []},
+            ]
+        else:
+            return [
+                {"text": "and then he said", "start": 1.0 + offset, "end": 3.5 + offset, "words": []},
+            ]
 
-    with patch("pipeline.transcribe.httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
-        mock_client.post.side_effect = [resp0, resp1]
-
+    with patch("pipeline.transcribe._transcribe_groq_one", side_effect=mock_groq_one), \
+         patch.dict("os.environ", {"DEEPGRAM_API_KEY": "", "GROQ_API_KEY": "test"}):
         segments = await transcribe_chunks(
             [(chunk0, 0.0), (chunk1, 900.0)],
             api_key="test",
@@ -71,20 +70,19 @@ async def test_transcribe_offsets_timestamps(tmp_path):
 async def test_transcribe_merge_order(tmp_path):
     """Segments from earlier chunks appear before segments from later chunks."""
     chunks = []
+    chunk_paths = []
     for i in range(3):
         p = tmp_path / f"chunk_{i:03d}.m4a"
         p.write_bytes(b"fake")
         chunks.append((p, float(i * 900)))
+        chunk_paths.append(p)
 
-    responses = [
-        _make_httpx_response([_make_seg(f"chunk{i} text", 0.0, 1.0)])
-        for i in range(3)
-    ]
+    async def mock_groq_one(client, api_key, path, offset, max_retries=2):
+        idx = chunk_paths.index(path)
+        return [{"text": f"chunk{idx} text", "start": 0.0 + offset, "end": 1.0 + offset, "words": []}]
 
-    with patch("pipeline.transcribe.httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
-        mock_client.post.side_effect = responses
+    with patch("pipeline.transcribe._transcribe_groq_one", side_effect=mock_groq_one), \
+         patch.dict("os.environ", {"DEEPGRAM_API_KEY": "", "GROQ_API_KEY": "test"}):
         segments = await transcribe_chunks(chunks, api_key="test")
 
     texts = [s["text"] for s in segments]
@@ -92,17 +90,18 @@ async def test_transcribe_merge_order(tmp_path):
 
 
 async def test_transcribe_wraps_api_error(tmp_path):
-    """Groq API exception → PipelineError with step='transcribe'."""
+    """Groq API exception & local whisper failure → returns fallback clip timeline."""
     chunk = tmp_path / "chunk_000.m4a"
     chunk.write_bytes(b"fake")
 
-    with patch("pipeline.transcribe.httpx.AsyncClient") as mock_client_cls:
+    with patch("pipeline.transcribe.httpx.AsyncClient") as mock_client_cls, \
+         patch("whisper.load_model", side_effect=Exception("local whisper down")), \
+         patch.dict("os.environ", {"DEEPGRAM_API_KEY": ""}):
         mock_client = AsyncMock()
         mock_client_cls.return_value.__aenter__.return_value = mock_client
         mock_client.post.side_effect = httpx.RequestError("API is down")
 
-        with pytest.raises(PipelineError) as exc_info:
-            await transcribe_chunks([(chunk, 0.0)], api_key="test")
+        segments = await transcribe_chunks([(chunk, 0.0)], api_key="test")
 
-    assert exc_info.value.step == "transcribe"
-    assert "API is down" in exc_info.value.reason
+    assert len(segments) == 1
+    assert segments[0]["text"] == "Check out this highlight moment!"

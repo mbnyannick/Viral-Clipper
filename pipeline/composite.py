@@ -89,7 +89,7 @@ def _detect_action_motion_peak(clip_path: Path) -> float:
     return peak_sec
 
 
-async def _probe_video_position(clip_path: Path, apply_4_3_crop: bool = False) -> tuple[int, int]:
+async def _probe_video_position(clip_path: Path, apply_4_3_crop: bool = False) -> tuple[int, int, int, int]:
     cmd = [
         "ffprobe", "-v", "quiet",
         "-select_streams", "v:0",
@@ -109,6 +109,14 @@ async def _probe_video_position(clip_path: Path, apply_4_3_crop: bool = False) -
     except ValueError:
         w, h = 1920, 1080
 
+    max_dim = max(w, h)
+    if max_dim >= 3840:
+        canvas_w, canvas_h = 2160, 3840  # 4K Ultra HD Vertical
+    elif max_dim >= 2560:
+        canvas_w, canvas_h = 1440, 2560  # 2K Quad HD Vertical
+    else:
+        canvas_w, canvas_h = 1080, 1920  # Full HD 1080p Vertical (Mandatory minimum)
+
     if apply_4_3_crop:
         # After center-cropping 16:9 → 4:3: effective width = h * 4/3
         eff_w = int(h * 4 / 3)
@@ -116,11 +124,11 @@ async def _probe_video_position(clip_path: Path, apply_4_3_crop: bool = False) -
     else:
         eff_w, eff_h = w, h
 
-    scale = min(CANVAS_W / eff_w, CANVAS_H / eff_h)
+    scale = min(canvas_w / eff_w, canvas_h / eff_h)
     scaled_h = int(eff_h * scale)
-    video_top_y = (CANVAS_H - scaled_h) // 2
+    video_top_y = (canvas_h - scaled_h) // 2
 
-    return video_top_y, scaled_h
+    return canvas_w, canvas_h, video_top_y, scaled_h
 
 
 
@@ -207,23 +215,24 @@ async def _composite_one(
     _, wm_w, wm_h = prepare_watermark(watermark_path, norm_wm_path)
 
     is_square = layout_mode != "face_crop"
+    canvas_w, canvas_h, video_top_y, scaled_h = await _probe_video_position(clip_path, apply_4_3_crop=is_square)
+
     if layout_mode == "face_crop":
         video_top_y = 0
-        scaled_h = CANVAS_H
+        scaled_h = canvas_h
         crop_filter_str = "crop=ih*9/16:ih:(iw-ih*9/16)/2:0"
     else:
-        # Standard 1:1 Square Ratio Baseline for BLUR, BLACK, and pillarbox modes (720x720 centered in 720x1280 vertical canvas)
-        scaled_h = CANVAS_W  # 720px height for 1:1 square video
-        video_top_y = (CANVAS_H - CANVAS_W) // 2  # 280px top position
+        scaled_h = canvas_w
+        video_top_y = (canvas_h - canvas_w) // 2
         crop_filter_str = _get_1_1_crop_filter()
 
     video_bottom_y = video_top_y + scaled_h
 
-    wm_x = max(10, min((CANVAS_W - wm_w) // 2, CANVAS_W - wm_w - 10))
+    wm_x = max(10, min((canvas_w - wm_w) // 2, canvas_w - wm_w - 10))
     if layout_mode == "face_crop":
-        wm_y = CANVAS_H - wm_h - 180
+        wm_y = canvas_h - wm_h - 180
     else:
-        wm_y = min(video_bottom_y + 12, CANVAS_H - wm_h - 10)
+        wm_y = min(video_bottom_y + 12, canvas_h - wm_h - 10)
     # Clean, natural studio profile (matches the BEFORE look — no harsh contrast, over-sharpening, or artificial saturation)
     COLOR_ENHANCE = "eq=contrast=1.00:brightness=0.00:saturation=1.00"
 
@@ -244,10 +253,16 @@ async def _composite_one(
     mood_dir = bgm_dir / mood
     bgm_tracks = []
     if mood_dir.exists():
-        bgm_tracks = list(mood_dir.glob("*.mp3")) + list(mood_dir.glob("*.wav"))
+        bgm_tracks = [
+            f for f in (list(mood_dir.glob("*.mp3")) + list(mood_dir.glob("*.wav")))
+            if not f.name.startswith(".") and not f.name.startswith("._")
+        ]
 
     if not bgm_tracks and bgm_dir.exists():
-        bgm_tracks = list(bgm_dir.rglob("*.mp3")) + list(bgm_dir.rglob("*.wav"))
+        bgm_tracks = [
+            f for f in (list(bgm_dir.rglob("*.mp3")) + list(bgm_dir.rglob("*.wav")))
+            if not f.name.startswith(".") and not f.name.startswith("._")
+        ]
 
     bgm_file = bgm_tracks[moment.index % len(bgm_tracks)] if bgm_tracks else None
     if not bgm_file:
@@ -314,9 +329,15 @@ async def _composite_one(
             return "[out2]null[out]"
 
     if layout_mode == "face_crop":
-        crop_filter = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale={CANVAS_W}:{CANVAS_H}:flags=lanczos"
+        try:
+            from .crop import generate_dynamic_face_tracking_filter
+            crop_filter = generate_dynamic_face_tracking_filter(clip_path)
+        except Exception as crop_exc:
+            logger.warning("Dynamic face tracking fallback to center crop: %s", crop_exc)
+            crop_filter = f"crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale={CANVAS_W}:{CANVAS_H}:flags=lanczos"
+
         logger.info(
-            "  Compositing clip %02d (face_crop clean full screen, wm_y=%d)",
+            "  Compositing clip %02d (face_crop dynamic tracking vertical, wm_y=%d)",
             moment.index, wm_y,
         )
         sub_stage = _build_sub_stage(sub_file, enable_subtitles, aura_filter)
@@ -402,7 +423,10 @@ async def _composite_one(
     sfx_files = []
     for sp in sfx_search_paths:
         if sp.exists():
-            sfx_files.extend([f for f in sp.rglob("*.*") if f.suffix.lower() in audio_exts])
+            sfx_files.extend([
+                f for f in sp.rglob("*.*")
+                if f.suffix.lower() in audio_exts and not f.name.startswith(".") and not f.name.startswith("._")
+            ])
 
     sfx_file = None
     if sfx_files:
@@ -416,34 +440,26 @@ async def _composite_one(
 
 
     # 100% Lip Sync: Original clip audio & video start together at 0.0s
-    # When voiceover exists, clip audio & BGM are ducked to 10-15% during narration, then boost to full volume
-    if vo_dur > 0:
-        audio_mix_filters = [f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=eval=frame:volume='if(lt(t,{vo_dur:.2f}),0.15,1.3)'[orig_a]"]
-    else:
-        audio_mix_filters = ["[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.3[orig_a]"]
+    # Voice/speech volume: boosted to 1.35x for crystal clear dialogue intelligibility
+    # Background music volume: balanced to subtle 6% ambience (never overpowers speech)
+    # Sound effect volume: calibrated to clean 30% punch
+    audio_mix_filters = ["[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.35[orig_a]"]
 
     mix_inputs = ["[orig_a]"]
 
-    if vo_input_idx is not None:
-        audio_mix_filters.append(f"[{vo_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.8[vo_a]")
-        mix_inputs.append("[vo_a]")
-
     if bgm_input_idx is not None:
-        if vo_dur > 0:
-            audio_mix_filters.append(f"[{bgm_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=eval=frame:volume='if(lt(t,{vo_dur:.2f}),0.10,0.25)',aloop=loop=-1:size=2e+09[bgm_a]")
-        else:
-            audio_mix_filters.append(f"[{bgm_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.25,aloop=loop=-1:size=2e+09[bgm_a]")
+        audio_mix_filters.append(f"[{bgm_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.06,aloop=loop=-1:size=2e+09[bgm_a]")
         mix_inputs.append("[bgm_a]")
 
     if sfx_input_idx is not None:
         sfx_peak_sec = _detect_action_motion_peak(clip_path)
         sfx_delay_ms = int(sfx_peak_sec * 1000)
-        audio_mix_filters.append(f"[{sfx_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.6,adelay=delays={sfx_delay_ms}|{sfx_delay_ms}[sfx_a]")
+        audio_mix_filters.append(f"[{sfx_input_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.30,adelay=delays={sfx_delay_ms}|{sfx_delay_ms}[sfx_a]")
         mix_inputs.append("[sfx_a]")
 
     if len(mix_inputs) > 1:
         mix_str = "".join(mix_inputs)
-        audio_mix_filters.append(f"{mix_str}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=0:normalize=0,volume=2.2,aformat=sample_rates=48000:channel_layouts=stereo[outa]")
+        audio_mix_filters.append(f"{mix_str}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=2:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[outa]")
     else:
         audio_mix_filters.append("[orig_a]aformat=sample_rates=48000:channel_layouts=stereo[outa]")
 
@@ -519,14 +535,15 @@ _COMPOSITE_SEMAPHORE = asyncio.Semaphore(1)
 
 def _get_v_encoder_args() -> list[str]:
     if sys.platform == "darwin":
-        return ["-c:v", "h264_videotoolbox", "-b:v", "12000k"]
+        return ["-c:v", "h264_videotoolbox", "-b:v", "12000k", "-movflags", "+faststart"]
     return [
         "-c:v", "libx264",
-        "-preset", "superfast",
-        "-crf", "23",
-        "-maxrate", "6000k",
-        "-bufsize", "12000k",
-        "-threads", "2",
+        "-preset", "veryfast",
+        "-crf", "21",
+        "-maxrate", "12000k",
+        "-bufsize", "24000k",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
     ]
 
 

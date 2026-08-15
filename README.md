@@ -117,8 +117,8 @@ All tuning options are in `.env`:
 | `TOP_N_CLIPS` | `10` | Number of highlight moments to extract |
 | `CHUNK_DURATION_MINUTES` | `15` | Audio chunk size for transcription |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | `deepseek-chat` (fast) or `deepseek-reasoner` (higher quality) |
-| `PUBLIC_BASE_URL` | `https://150-136-108-208.sslip.io` | Public base URL for hosted clips/thumbnails |
-| `MAKE_WEBHOOK_URL` | `{PUBLIC_BASE_URL}/webhook/viral-post` | Webhook for auto-posting clips |
+| `PUBLIC_BASE_URL` | `https://132-145-223-32.sslip.io` | Public base URL for hosted clips/thumbnails |
+| `N8N_WEBHOOK_URL` | `{PUBLIC_BASE_URL}:5678/webhook/viral-post` | n8n Webhook for auto-posting clips |
 | `CLIP_WINDOW_MINUTES` | `60` | Progressive mode: scan window size for live streams |
 
 **YouTube cookies:** the container reads `cookies.txt` at the repo root (Netscape format, exported via yt-dlp). This authenticates YouTube requests and avoids the "Sign in to confirm you're not a bot" block. Re-export it periodically as cookies expire.

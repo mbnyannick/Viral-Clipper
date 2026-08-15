@@ -17,6 +17,7 @@ from pathlib import Path
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
 from .errors import PipelineError
+from .text_utils import format_seo_title, generate_rich_hashtags, mask_profanity
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,13 @@ def _is_admin_chat(chat_id: int | str) -> bool:
     op_id = os.environ.get("TELEGRAM_OPERATOR_CHAT_ID", "").strip()
     if not op_id or op_id == "0":
         return True
-    return str(chat_id).strip() == op_id
+    if str(chat_id).strip() == op_id:
+        return True
+    try:
+        from bot.handlers import _is_operator
+        return _is_operator(int(chat_id))
+    except Exception:
+        return True
 
 
 async def deliver_clips(
@@ -68,32 +75,26 @@ async def deliver_clips(
             tier = "S-Tier"
             reasoning = "High viral potential."
 
-        if custom_cap:
-            clean_text = html.escape(custom_cap.strip())
+        if m:
+            raw_title = getattr(m, "title", None) or getattr(m, "caption_lines", None) or f"{streamer} Stream Moment"
+            emoji = getattr(m, "emoji", "🔥😂💀") or "🔥😂💀"
+            seo_title = format_seo_title(raw_title, streamer=streamer, default_emoji=emoji)
+            aura_word = getattr(m, "aura_word", "")
+            raw_tags = getattr(m, "hashtags", "")
+            rich_tags = generate_rich_hashtags(streamer=streamer, topic=raw_title if isinstance(raw_title, str) else "", aura_word=aura_word, existing_hashtags=raw_tags)
+            
+            caption_lines_text = " ".join(m.caption_lines) if hasattr(m, "caption_lines") and m.caption_lines else seo_title
+            caption_lines_text = mask_profanity(caption_lines_text)
+            social_body = f"{caption_lines_text} {emoji}\n\n{rich_tags}"
+
             caption = (
-                f"📹 <b>Clip {i:02d}/{total:02d}</b> — ⚡ <i>Hook Score: {score}/100 ({tier})</i>\n\n"
+                f"🎬 <b>Clip {i:02d}/{total:02d}</b> • <b>{html.escape(streamer)}</b> ⚡ <i>Score: {score}/100 ({tier})</i>\n"
                 f"💡 <i>{html.escape(reasoning)}</i>\n\n"
-                f"<code>{clean_text}</code>"
+                f"🔴 <b>YouTube Title:</b>\n<code>{html.escape(seo_title)}</code>\n\n"
+                f"📱 <b>Caption &amp; Hashtags:</b>\n<code>{html.escape(social_body)}</code>"
             )
         else:
-            if m:
-                raw_title = getattr(m, "title", None)
-                if not raw_title and hasattr(m, "caption_lines"):
-                    raw_title = " ".join(m.caption_lines)
-                elif not raw_title:
-                    raw_title = "Viral Clip"
-
-                clean_title = html.escape(raw_title)
-                emoji = getattr(m, "emoji", "🤯") or "🤯"
-                hashtags = getattr(m, "hashtags", "") or f"#{streamer.replace(' ', '')} #StreamerHighlights #KickClips #TikTokViral #ReelsTrends #Shorts"
-                copy_payload = f"{clean_title} {emoji}\n\n{hashtags}"
-                caption = (
-                    f"📹 <b>Clip {i:02d}/{total:02d}</b> — ⚡ <i>Hook Score: {score}/100 ({tier})</i>\n\n"
-                    f"💡 <i>{html.escape(reasoning)}</i>\n\n"
-                    f"<code>{copy_payload}</code>"
-                )
-            else:
-                caption = f"📹 <b>Clip {i:02d}/{total:02d}</b>"
+            caption = f"🎬 <b>Clip {i:02d}/{total:02d}</b>"
 
         if _is_admin_chat(chat_id):
             action_keyboard = InlineKeyboardMarkup([
@@ -108,6 +109,9 @@ async def deliver_clips(
                     InlineKeyboardButton("📘 Facebook", callback_data=f"post:facebook:{i}"),
                 ],
                 [
+                    InlineKeyboardButton("📋 Copy Caption & Hashtags", callback_data=f"pub:mobile:{i}"),
+                ],
+                [
                     InlineKeyboardButton("🗑️ Discard Clip", callback_data=f"discard:{i}"),
                 ],
             ])
@@ -116,8 +120,8 @@ async def deliver_clips(
 
 
         target_path = path
-        if path.exists() and path.stat().st_size > 49 * 1024 * 1024:
-            logger.warning("Clip %d (%.1f MB) exceeds 50MB Telegram limit. Auto-compressing...", i, path.stat().st_size / (1024*1024))
+        if path.exists() and path.stat().st_size > 45 * 1024 * 1024:
+            logger.warning("Clip %d (%.1f MB) exceeds 45MB threshold. Auto-compressing...", i, path.stat().st_size / (1024*1024))
             compressed = path.parent / f"{path.stem}_comp.mp4"
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -141,6 +145,9 @@ async def deliver_clips(
                     parse_mode="HTML",
                     reply_markup=action_keyboard,
                     supports_streaming=True,
+                    read_timeout=180.0,
+                    write_timeout=180.0,
+                    connect_timeout=60.0,
                 )
             logger.info("  Sent Clip %d/%d with Action Buttons", i, total)
         except Exception as exc:
@@ -151,6 +158,9 @@ async def deliver_clips(
                         video=fh,
                         caption=f"📹 Clip {i:02d}/{total:02d}",
                         supports_streaming=True,
+                        read_timeout=180.0,
+                        write_timeout=180.0,
+                        connect_timeout=60.0,
                     )
             except Exception as final_exc:
                 logger.warning("Failed to deliver clip %d (%s)", i, final_exc)

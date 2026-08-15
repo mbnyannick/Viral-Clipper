@@ -5,6 +5,11 @@ services:
     build: .
     restart: always
     env_file: .env
+    environment:
+      - YTDLP_POT_BASE_URL=http://bgutil-pot:4416
+      - YTDLP_PROXY=http://172.17.0.1:8118
+    depends_on:
+      - bgutil-pot
     volumes:
       # Persist runtime scratch across restarts (optional — cleaned up per-run anyway)
       - ./tmp:/app/tmp
@@ -25,4 +30,36 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8G
+          memory: 3G
+
+  bgutil-pot:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    restart: always
+    ports:
+      - "4416:4416"
+
+  clips-web:
+    image: python:3.11-slim
+    command: python -m http.server 8080 --directory /app/tmp
+    restart: always
+    volumes:
+      - ./tmp:/app/tmp
+    ports:
+      - "8080:8080"
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://localhost:5678/
+    volumes:
+      - ~/.n8n:/home/node/.n8n
+
+
+
