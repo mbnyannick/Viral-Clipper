@@ -180,7 +180,7 @@ def generate_rich_hashtags(
                 _add(raw)
 
     # 2. Creator specific hashtags
-    if clean_streamer and clean_streamer.lower() != "streamer":
+    if clean_streamer and clean_streamer.lower() not in ("streamer", "bro", "unknown", "none", "anonymous"):
         _add(f"#{clean_streamer}")
         _add(f"#{clean_streamer}Clips")
         _add(f"#{clean_streamer}Live")

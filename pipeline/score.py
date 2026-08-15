@@ -81,52 +81,47 @@ STREAMER & VIDEO CONTEXT:
 - Main Streamer / Creator: {streamer}
 - Video Title: {video_title}
 
-SPEAKER & CAPTION IDENTIFICATION RULES (CRITICAL):
-1. TRUE IDENTITY FROM TRANSCRIPT DIALOGUE (CRITICAL): Channel names or handles (e.g., 'jayyy566', 'user9218', 'Daily VOD Clips', 'Ray Life', 'Kai Live') are frequently handles, aggregators, or suffix-heavy names. You MUST analyze the spoken dialogue in the transcript to deduce the TRUE REAL NAME by which the streamer is addressed in speech (e.g., "Ray", "Carterefe", "Kai", "N3on", "Davido", "Speed", "xQc", "Adin").
-2. STRIP CHANNEL SUFFIXES & BRAND WORDS:
-   - If channel is named 'Ray Life', 'Ray Live', 'Ray Clips' -> Real Name is ONLY "Ray" (NEVER call them "Life" or "Live"!).
-   - If channel is named 'Kai Cenat Live', 'Kai Clips' -> Real Name is ONLY "Kai" or "Kai Cenat".
-   - If channel is named 'N3on Live', 'N3on Central' -> Real Name is ONLY "N3on".
-3. USE CLEAN SHORT NAMES: Once you deduce the true identity, use ONLY their clean short real names in text overlays, YouTube Shorts titles, and hashtags.
-4. SECONDARY/GUEST SPEAKER RULE — "BRO" (MANDATORY): When referencing any person who is NOT the main streamer — whether a guest, chat user, random caller, interviewer, opponent, or anyone else — ALWAYS call them "Bro" in caption_lines and titles. Do NOT try to guess or invent their name. "Bro" is gender-neutral Gen Z language that works for both males and females. Example: "Bro CLAPPED Back Hard 😂", "Bro Said WHAT?! 😱", "Bro Can't HANDLE It 💀".
-5. PROFANITY MASKING & GARDEN-FRIENDLY COMPLIANCE (MANDATORY): NEVER output raw un-censored swear words, toxic terms, or explicit language in caption_lines, titles, or descriptions. All content MUST be 100% garden-friendly (family-friendly, advertiser-safe, algorithm-optimized). Always sanitize any profanity using asterisks (e.g. "F**K", "K*LL", "SH*T", "B*TCH").
-6. MANDATORY EMOJIS (2 TO 3 EMOJIS): Every single title and caption MUST include 2 to 3 vibrant, high-energy, contextually relevant emoji characters (e.g. "🔥😂💀", "😱🚨🤯", "💀😭🔥").
-7. EVEN TIMELINE DISTRIBUTION: Spread the {top_n} moments across the full timeline of the video (beginning, middle, and end).
-8. GARDEN-FRIENDLY TOPIC HASHTAGS (12 TO 18 HASHTAGS): For EVERY clip, generate 12 to 18 HIGHLY RELEVANT, garden-friendly hashtags based directly on the video's actual topic, streamer name, action, and subject matter (e.g. "#{streamer} #{streamer}Clips #{streamer}Highlights #TopicName #Gaming #Highlights #ViralShorts #TikTokViral #ReelsTrends #FYP #Trending #Shorts"). Include as many relevant hashtags as possible!
+SPEAKER & CREATOR IDENTIFICATION RULES (CRITICAL):
+1. VERIFIED CREATOR NAME RULE:
+   - When the creator/streamer's identity is known and verified (e.g. from the stream context "{streamer}" or explicitly named in spoken dialogue like "Kai", "PlaqueBoyMax", "Speed", "Adin", "xQc", "Duke Dennis", "Fanum", "Jynxzi"), USE THEIR REAL VERIFIED NAME in titles, hook cards, and hashtags.
+   - Strip channel suffixes: "PlaqueBoyMaxLive" -> "PlaqueBoyMax", "Kai Cenat Live" -> "Kai Cenat" or "Kai", "Ray Life" -> "Ray".
+2. UNKNOWN / UNVERIFIED CREATOR RULE — USE "BRO" & NEUTRAL DESCRIPTORS (MANDATORY):
+   - If you do NOT know the exact streamer's name (or if "{streamer}" is generic like "Streamer" or unverified), DO NOT GUESS OR INVENT A NAME!
+   - ALWAYS remember: Audio transcripts and text cannot tell who is speaking or distinguish male from female voices. NEVER hallucinate a creator's name or assume their gender.
+   - If the streamer is unknown or unverified, ALWAYS use "Bro" or universal neutral descriptors: "Bro", "They", "Streamer", "This guy", "This person" (e.g. "Bro Did NOT Expect This Ending 😂💀🔥", "When Bro Tries To Explain The Flop 💀🤣🔥", "Bro Thought They Were Getting Away With It 😱🔥👀").
+3. SECONDARY / GUEST / OPPONENT SPEAKER RULE — "BRO" (MANDATORY):
+   - Anyone other than the verified main streamer — whether a guest, caller, opponent, chat member, or bystander — MUST be referred to as "Bro" in caption lines and titles. "Bro" is universal Gen-Z terminology that works seamlessly for anyone.
+4. ZERO HALLUCINATION / NEVER USE THE WRONG PERSON:
+   - You MUST NEVER attribute quotes, reactions, or actions to the wrong creator or person. If in any doubt whatsoever, use "Bro".
+5. PROFANITY MASKING & GARDEN-FRIENDLY COMPLIANCE (MANDATORY):
+   - NEVER output raw un-censored swear words or explicit slurs. All content MUST be 100% garden-friendly (family-friendly, advertiser-safe, algorithm-optimized). Mask profanity with asterisks (e.g. "F**K", "SH*T", "B*TCH", "D*CK").
+6. MANDATORY EMOJIS (2 TO 3 EMOJIS):
+   - Every single title and caption MUST include 2 to 3 vibrant, high-energy, contextually relevant emoji characters (e.g. "🔥😂💀", "😱🚨🤯", "💀😭🔥").
+7. EVEN TIMELINE DISTRIBUTION:
+   - Spread the {top_n} moments across the full timeline of the video (beginning, middle, and end).
+8. GARDEN-FRIENDLY TOPIC HASHTAGS (12 TO 18 HASHTAGS):
+   - Generate 12 to 18 relevant viral hashtags. If streamer is verified, include creator tags (e.g. "#{streamer} #{streamer}Clips"). If streamer is unknown, focus on topic, reaction, and viral discovery tags.
 
 CAPTION FORMAT (3-LINE VIRAL STORYTELLING CARD):
 9. EXACTLY 3 LINES in caption_lines — Follow the viral 3-part narrative hook pattern:
-   - Line 1 = HOOK / SETUP with 1 ALL CAPS word (e.g. "she asked about VIRGINS")
+   - Line 1 = HOOK / SETUP with 1 ALL CAPS word (e.g. "she asked about VIRGINS" or "Bro tried a FLOP")
    - Line 2 = ACTION / RESPONSE (e.g. "he said yes" or "Bro responded instantly")
-   - Line 3 = PAYOFF / ESCALATION with 1 ALL CAPS word (e.g. "then she went FURTHER")
-   - Max 4–5 words per line. Keep Phrasing casual, natural, and garden-friendly.
+   - Line 3 = PAYOFF / ESCALATION with 1 ALL CAPS word (e.g. "then they ARGUED hard")
+   - Max 4–5 words per line. Keep phrasing casual, natural, and garden-friendly.
 10. CAPS EMPHASIS WORDS: Put 1 key emphasis word in ALL CAPS in Line 1 and Line 3 so they automatically render in bold text on the top white card overlay.
-11. 100% UNIQUE PHRASING — no repeated words, hooks, or sentence structure across any clip in this batch.
-12. DO NOT put emojis directly inside caption_lines — they belong in the "emoji" field only (which is appended to line 3 during PNG rendering).
+11. 100% UNIQUE PHRASING — no repeated words, hooks, or sentence structures across any clip in this batch.
+12. DO NOT put emojis directly inside caption_lines — they belong in the "emoji" field only.
 
 AURA KEYWORD RULE (100% CONTEXTUALLY RELEVANT):
-12. For EVERY clip, pick ONE single uppercase word that directly relates to what is happening in THIS SPECIFIC moment.
+13. Pick ONE single uppercase word that directly relates to what is happening in THIS SPECIFIC moment (e.g. PRANK, FLOP, COOKED, SPOTTED, EXPOSED, BUSTED, SHOCKED).
     - It MUST be a single word (no spaces, no punctuation)
-    - It MUST be ALL CAPS (e.g. PRANK, SPOTTED, KNOCKOUT, RECOGNIZED, BUSTED, ROASTED, EXPOSED, SHOCKED)
-    - CRITICAL: Do NOT pick generic random words like "AURA" or "WHO". The word MUST be 100% derived from the actual clip action/topic (e.g., if it's a boxer prank, use `PRANK` or `BOXER`; if a fan recognizes the streamer, use `SPOTTED` or `CAUGHT`; if an insult occurs, use `ROASTED`).
+    - It MUST be ALL CAPS
 
 VIRAL CLIP SELECTION — MANDATORY HOOK → EVENT → PAYOFF EVALUATION:
-Evaluate every candidate moment strictly based on the HOOK → EVENT → PAYOFF storytelling structure.
-The selector's primary objective is: Find self-contained mini-stories that hook the viewer, build tension/curiosity, and deliver a 100% complete, emotionally or visually satisfying payoff.
-
-1. HOOK (0–3s): Identify where viewer curiosity/interest begins (unexpected statement, question, conflict, person approaching, visual surprise, or reaction). Start the clip shortly BEFORE the hook begins.
-2. EVENT (Development): Identify the situation unfolding after the hook. Remove dead time and meaningless chatter.
-3. PAYOFF (CRITICAL & MANDATORY): Identify the exact moment that rewards the viewer for watching (a punchline, shocking statement, funny response, confrontation, or sudden realization).
-   - PAYOFF WEIGHTING (CRITICAL): Give EXTRA WEIGHT to payoff strength in the "score" field.
-   - DO NOT select a moment simply because someone says something interesting. If the setup is good but the payoff is weak, LOWER THE VIRAL SCORE (score <= 60).
-   - NEVER CUT OFF A CLIP BEFORE THE PAYOFF FINISHES! The viewer MUST receive a complete, satisfying conclusion before the clip ends.
-4. START/END OPTIMIZATION:
-   - Start timestamp: 2–3 seconds BEFORE the hook begins to provide immediate context.
-   - End timestamp: 2–3 seconds AFTER the payoff/reaction completes so the clip feels like a complete mini-story and doesn't cut mid-sentence or mid-laughter.
-5. BEST CANDIDATE BEHAVIOR:
-   - Prefer (Strong Hook + Clear Event + Strong Payoff) over (Strong Hook + Long Conversation + Weak Payoff).
-   - Prefer (Short Setup + Immediate Payoff) over (Long Setup + Slightly Better Payoff).
-   - Ensure anyone who has NEVER seen this streamer before can watch the clip and immediately understand: "Oh, this is what is going on!"
+14. Evaluate every candidate moment strictly based on the HOOK → EVENT → PAYOFF storytelling structure.
+    - Start timestamp: 2–3 seconds BEFORE the hook begins to provide immediate context.
+    - End timestamp: 2–3 seconds AFTER the payoff/reaction completes so the clip feels like a complete mini-story and doesn't cut mid-sentence or mid-laughter.
+    - Prefer (Strong Hook + Clear Event + Strong Payoff) over (Strong Hook + Long Conversation + Weak Payoff).
 
 Return ONLY a valid JSON array with exactly {top_n} objects. No markdown, no explanation, just raw JSON.
 
@@ -141,8 +136,8 @@ Each object must have exactly these fields:
   "score"         — integer, Viral potential score from 0 to 100
   "reasoning"     — string, a punchy 1-sentence explanation of why Hook -> Event -> Payoff is complete
   "title"         — string, HIGH-CTR SEO Title (35–50 chars). Written as a clean, compelling story sentence ending with 2–3 emojis. CRITICAL SEO RULES: NO slashes (/ or \\), NO pipes (|), NO ellipses (...), NO quotation marks, and NO hashtags (#Shorts or #Viral). Examples: "Jason Becomes a Voice Actor 😭🎙️🔥", "Speed Did Not Expect This Reaction 💀😂🔥", "When She Realized Who He Was 😱🔥👀", "Bro Thought He Was Getting Away With It 💀🤣🔥"
-  "hashtags"      — string, 12 to 18 garden-friendly, topic-specific viral hashtags separated by spaces (e.g. "#{streamer} #{streamer}Clips #GamingMoments #FunnyClips #StreamerHighlights #ViralShorts #TikTokViral #ReelsTrends #FYP #Trending #ExplorePage #Viral")
-  "aura_word"     — string, ONE single ALL CAPS word capturing this clip's energy (e.g. "COOKED", "AURA", "IMPRESSED", "CAUGHT", "DEAD", "WILD", "REAL", "WHO", "NOPE")
+  "hashtags"      — string, 12 to 18 garden-friendly, topic-specific viral hashtags separated by spaces
+  "aura_word"     — string, ONE single ALL CAPS word capturing this clip's energy (e.g. "COOKED", "AURA", "IMPRESSED", "CAUGHT", "DEAD", "WILD")
 """
 
 
