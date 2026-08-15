@@ -116,7 +116,7 @@ def _make_clips_keyboard() -> InlineKeyboardMarkup:
 def _make_duration_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🤖 Smart Auto (Recommended)", callback_data="dur:auto"),
+            InlineKeyboardButton("🤖 Smart Auto (0–61s)", callback_data="dur:auto"),
         ],
         [
             InlineKeyboardButton("⚡ 0 to 30 Seconds", callback_data="dur:0_30"),
@@ -381,13 +381,14 @@ async def _launch_job(chat_id: int, num_clips: int, target_duration: str = "auto
     wm_name = session.get("wm_name", "None")
 
     dur_map = {
-        "auto": "⚡ Automatic (25–60s)",
+        "auto": "⚡ Automatic (0–61s)",
         "0_30": "⏱️ 0 – 30 Seconds",
         "15_30": "⏱️ 15 – 30 Seconds",
         "30_60": "⏱️ 30s – 1 Minute",
+        "61_90": "⏱️ 61 – 90 Seconds",
         "60_120": "⏱️ 1 – 2 Minutes",
     }
-    dur_label = dur_map.get(target_duration, "⚡ Automatic (25–60s)")
+    dur_label = dur_map.get(target_duration, "⚡ Automatic (0–61s)")
 
     mode_map = {
         "black_canvas": "🖤 1:1 Square (Black Canvas)",

@@ -180,14 +180,15 @@ async def score_moments(
     display_streamer = clean_streamer_name(streamer)
 
     dur_rules = {
-        "0_30": "Each moment MUST be between 10 and 30 seconds (end - start MUST be >= 10 and <= 30).",
+        "0_30": "Each moment MUST be between 5 and 30 seconds (end - start MUST be >= 5 and <= 30).",
         "15_30": "Each moment MUST be between 15 and 30 seconds (end - start MUST be >= 15 and <= 30).",
         "30_60": "Each moment MUST be between 30 and 60 seconds (end - start MUST be >= 30 and <= 60).",
+        "61_90": "Each moment MUST be between 61 and 90 seconds (end - start MUST be >= 61 and <= 90).",
         "60_120": "Each moment MUST be between 60 and 120 seconds (1 to 2 minutes) (end - start MUST be >= 60 and <= 120).",
     }
     dur_text = dur_rules.get(
         target_duration,
-        "Each moment's duration MUST be dynamically determined by the exact natural length of the Hook -> Event -> Payoff story arc (between 10 and 60 seconds). Let the complete sentence and natural conversation payoff determine the exact clip length so the moment never cuts off."
+        "Each moment's duration MUST be dynamically determined by the exact natural length of the Hook -> Event -> Payoff story arc, anywhere from 0 to 61 seconds (end - start MUST be <= 61 seconds). Let the complete sentence and natural conversation payoff determine the exact clip length so the moment never cuts off."
     )
 
     system = _SYSTEM_PROMPT.format(
